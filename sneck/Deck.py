@@ -84,34 +84,32 @@ class DeckStack:
 
 
 class DeckBoard:
-    def __init__(self, identifier: int, tag: str, permissions: dict, stacks: list, synchronize: bool, shared: bool,
-                 archived: bool, title: str, color: str, labels: list, owner: DeckUser, board_deletion_time: datetime,
-                 board_last_modification_time: datetime, notification_settings: str, acl: DeckAcl):
+    def __init__(self, board: dict, stacks: list):
         # Internal identifiers for the board
-        self.__id = identifier
-        self.__tag = tag
+        self.__id = board['id']
+        self.__tag = board['ETag']
 
         # Internal data to be exposed through accessors
-        self.__permissions = permissions                        # Permissions for the current user (r,w,share,manage)
-        self.__notification_settings = notification_settings    # Notification settings for board
-        self.__synchronize = synchronize                        # Whether the board synchronizes with CalDAV
+        self.__permissions = board['permissions']                       # Permissions for this user (r,w,share,manage)
+        self.__notification_settings = board['settings']['notify-due']  # Notification settings for board
+        self.__synchronize = board['settings']['calendar']              # Whether the board synchronizes with CalDAV
 
-        self.title = title
-        self.color = color
-        self.labels = labels
+        self.title = board['title']
+        self.color = board['color']
+        self.labels = board['labels']
 
         # Access control and permissions
-        self.owner = owner
-        self.acl = acl
+        self.owner = DeckUser(board['owner'])
+        self.acl = DeckAcl(board['acl'])
 
-        self.archived = archived    # Board archived by current user
-        self.shared = shared        # Board shared to the current user (not owned by current user)
-
-        self.stacks = stacks        # Non-empty stacks of the board
+        self.archived = board['archived']   # Board archived by current user
+        self.shared = board['shared']       # Board shared to the current user (not owned by current user)
 
         # Timestamps for deletion and last edit. Deletion timestamp is 0 if the board has not been deleted
-        self.delete_time = board_deletion_time
-        self.modify_time = board_last_modification_time
+        self.delete_time = None if board['deletedAt'] == 0 else datetime.fromtimestamp(board['deletedAt'])
+        self.modify_time = None if board['lastModified'] == 0 else datetime.fromtimestamp(board['lastModified'])
+
+        self.stacks = [DeckStack(stack) for stack in stacks]    # Non-empty stacks of the board
 
     def can_read(self):
         return self.__permissions['PERMISSION_READ']
@@ -260,11 +258,12 @@ class Deck:
         decoder = json.JSONDecoder()
 
         boards = decoder.decode(self.__api_request('boards'))
-        for b in boards:
-            if not self.__is_outdated(b['title'], b['lastModified']) or b['deletedAt'] != 0 or b['title'] == 'Personal':
-                continue
+        self.boards = [DeckBoard(b, self.__api_request(f'boards/{b["id"]}/stacks')) for b in boards]
 
-            self.boards[b['ETag']] = self.__parse_board(b)
+        # for b in boards:
+        #   if not self.__is_outdated(b['title'], b['lastModified']) or b['deletedAt'] != 0 or b['title'] == 'Personal':
+        #        continue
+
 
     def get_all_cards(self) -> list:
         result = []
