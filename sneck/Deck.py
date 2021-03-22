@@ -84,43 +84,46 @@ class DeckStack:
 
 
 class DeckBoard:
-    def __init__(self, bid: int, tag: str, perm: list, stacks: list, cal: bool, title: str, shared: bool, acl: list,
-                 archived: bool, col: str, lbls: list, own: DeckUser, delete: datetime, modify: datetime, notify: str):
-        # Internal board id and entity tag
-        self.__id = bid
-        self.__etag = tag
+    def __init__(self, identifier: int, tag: str, permissions: dict, stacks: list, synchronize: bool, shared: bool,
+                 archived: bool, title: str, color: str, labels: list, owner: DeckUser, board_deletion_time: datetime,
+                 board_last_modification_time: datetime, notification_settings: str, acl: DeckAcl):
+        # Internal identifiers for the board
+        self.__id = identifier
+        self.__tag = tag
 
-        # Current user access permissions
-        self.__read_permission = perm[0]
-        self.__edit_permission = perm[1]
-        self.__manage_permission = perm[2]
-        self.__share_permission = perm[3]
+        # Internal data to be exposed through accessors
+        self.__permissions = permissions                        # Permissions for the current user (r,w,share,manage)
+        self.__notification_settings = notification_settings    # Notification settings for board
+        self.__synchronize = synchronize                        # Whether the board synchronizes with CalDAV
 
-        # Internal board settings
-        self.__notifications_on = notify
-        self.__calendar_integration = cal
-
-        # Board information (visible as attribute)
         self.title = title
-        self.color = col
-        self.labels = lbls
+        self.color = color
+        self.labels = labels
 
-        # Users of the board (people that have access)
-        self.owner = own
+        # Access control and permissions
+        self.owner = owner
         self.acl = acl
 
-        # Properties of the board
-        self.is_archived = archived     # If it has been archived by user
-        self.is_shared = shared         # if it has been shared TO the user
+        self.archived = archived    # Board archived by current user
+        self.shared = shared        # Board shared to the current user (not owned by current user)
 
-        # Last edit and deletion times (deletion time is 0 if it has not been deleted)
-        self.delete_time = delete
-        self.modify_time = modify
+        self.stacks = stacks        # Non-empty stacks of the board
 
-        self.stacks = stacks
+        # Timestamps for deletion and last edit. Deletion timestamp is 0 if the board has not been deleted
+        self.delete_time = board_deletion_time
+        self.modify_time = board_last_modification_time
 
-    def is_deleted(self) -> bool:
-        return self.delete_time is not None
+    def can_read(self):
+        return self.__permissions['PERMISSION_READ']
+
+    def can_edit(self):
+        return self.__permissions['PERMISSION_READ']
+
+    def can_manage(self):
+        return self.__permissions['PERMISSION_READ']
+
+    def can_share(self):
+        return self.__permissions['PERMISSION_READ']
 
 
 class Deck:
