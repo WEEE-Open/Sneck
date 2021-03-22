@@ -121,6 +121,9 @@ class DeckBoard:
     def can_share(self):
         return self.__permissions['PERMISSION_READ']
 
+    def deleted(self):
+        return self.deletion_time is not None
+
 
 class Deck:
     def __init__(self, domain: str, username: str, password: str, secure: bool):
