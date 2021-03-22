@@ -36,36 +36,34 @@ class DeckAcl:
 
 
 class DeckCard:
-    def __init__(self, cid: int, etag: str, title: str, descr: str, labels: list, ctype: int, attachments: list,
-                 create: datetime, modify: datetime, delete: datetime, target: datetime, assignees: list,
-                 creator: DeckUser, editor: DeckUser, order: int, archived: bool, unread_comments: int, overdue: int):
-        # Internal card id and entity tag
-        self.__id = cid
-        self.__tag = etag
+    #def __init__(self, cid: int, etag: str, title: str, descr: str, labels: list, ctype: int, attachments: list,
+    #             create: datetime, modify: datetime, delete: datetime, target: datetime, assignees: list,
+    #             creator: DeckUser, editor: DeckUser, order: int, archived: bool, unread_comments: int, overdue: int):
+    def __init__(self, card: dict):
+        # Internal identifiers for the card
+        self.__id = card['id']
+        self.__tag = card['ETag']
 
-        # Card information
-        self.title = title
-        self.description = descr
-        self.labels = labels
-        self.type = ctype
-        self.attachments = attachments
+        self.title = card['title']
+        self.description = card['description']
+        self.labels = card['labels']
+        self.type = card['type']
+        self.attachments = [] if card['attachments'] is None else card['attachments']
+        self.order = card['order']
+        self.archived = card['archived']
+        self.unread_comments = card['commentsUnread']
+        self.overdue = card['overdue']
 
         # Timestamps
-        self.create_time = create
-        self.modify_time = modify
-        self.delete_time = delete
-        self.target_time = target   # Due date of the card
+        self.create_time = datetime.fromtimestamp(card['createdAt'])
+        self.modify_time = datetime.fromtimestamp(card['lastModified'])
+        self.delete_time = datetime.fromtimestamp(card['deletedAt'])
+        self.target_time = datetime.fromtimestamp(card['duedate'])   # Due date of the card
 
         # Users
-        self.assignees = assignees
-        self.creator = creator
-        self.last_editor = editor
-
-        # Metadata
-        self.order = order
-        self.archived = archived
-        self.unread_comments = unread_comments
-        self.overdue = overdue
+        self.assignees = [DeckUser(assignee) for assignee in card['assignedUsers']]
+        self.creator = DeckUser(card['owner'])  # TODO: differentiate between full json...
+        self.last_editor = None if card['lastEditor'] is None else DeckUser(card['lastEditor']) # TODO: ... and string
 
 
 class DeckStack:
