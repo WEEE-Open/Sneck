@@ -69,18 +69,16 @@ class DeckCard:
 
 
 class DeckStack:
-    def __init__(self, sid: int, tag: str, modify: datetime, order: int, title: str, cards: list):
-        # Internal stack id and entity tag
-        self.__id = sid
-        self.__etag = tag
+    def __init__(self, stack: dict):
+        # Internal identifiers for the board
+        self.__id = stack['id']
+        self.__tag = stack['ETag']
 
-        # Stack metadata
-        self.modify_time = modify
-        self.order = order
+        self.last_edit_time = stack['lastModified']
+        self.order = stack['order']
+        self.title = stack['title']
 
-        # Stack information
-        self.title = title
-        self.cards = cards
+        self.cards = [] if 'cards' not in stack else [DeckCard(card) for card in stack['cards']]
 
 
 class DeckBoard:
@@ -106,8 +104,8 @@ class DeckBoard:
         self.shared = board['shared']       # Board shared to the current user (not owned by current user)
 
         # Timestamps for deletion and last edit. Deletion timestamp is 0 if the board has not been deleted
-        self.delete_time = None if board['deletedAt'] == 0 else datetime.fromtimestamp(board['deletedAt'])
-        self.modify_time = None if board['lastModified'] == 0 else datetime.fromtimestamp(board['lastModified'])
+        self.deletion_time = None if board['deletedAt'] == 0 else datetime.fromtimestamp(board['deletedAt'])
+        self.last_edit_time = None if board['lastModified'] == 0 else datetime.fromtimestamp(board['lastModified'])
 
         self.stacks = [DeckStack(stack) for stack in stacks]    # Non-empty stacks of the board
 
@@ -263,7 +261,6 @@ class Deck:
         # for b in boards:
         #   if not self.__is_outdated(b['title'], b['lastModified']) or b['deletedAt'] != 0 or b['title'] == 'Personal':
         #        continue
-
 
     def get_all_cards(self) -> list:
         result = []
