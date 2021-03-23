@@ -9,36 +9,34 @@ from datetime import datetime
 
 
 class DeckUser:
-    def __init__(self, key: str, uid: str, utype: int, name: str):
-        self.__pkey = key     # Used as index in dictionary
-        self.__uuid = uid
-        self.__type = utype
+    def __init__(self, data: dict):
+        # Internal user identifiers and types
+        self.__pkey = data['primaryKey']
+        self.__uuid = data['uid']
+        self.__type = data['type']
 
-        self.name = name
+        self.name = data['displayname']
 
 
 class DeckAcl:
-    def __init__(self, aid: int, user: DeckUser, atype: int, edit: bool, share: bool, manage: bool, owner: bool):
-        # Internal ID of ACL
-        self.__id = aid
+    def __init__(self, data: dict):
+        # Internal identifier and type of the ACL
+        self.__id = data['id']
+        self.__type = data['type']
 
         # User this refers to
-        self.user = user
-        self.type = atype
+        self.principal = DeckUser(data['participant'])
 
         # If the user is the owner of the entity
-        self.is_owner = owner
+        self.owner = data['owner']
 
         # Access rights
-        self.can_edit = edit
-        self.can_share = share
-        self.can_manage = manage
+        self.can_edit = data['permissionEdit']
+        self.can_share = data['permissionShare']
+        self.can_manage = data['permissionManage']
 
 
 class DeckCard:
-    #def __init__(self, cid: int, etag: str, title: str, descr: str, labels: list, ctype: int, attachments: list,
-    #             create: datetime, modify: datetime, delete: datetime, target: datetime, assignees: list,
-    #             creator: DeckUser, editor: DeckUser, order: int, archived: bool, unread_comments: int, overdue: int):
     def __init__(self, card: dict):
         # Internal identifiers for the card
         self.__id = card['id']
@@ -55,15 +53,18 @@ class DeckCard:
         self.overdue = card['overdue']
 
         # Timestamps
-        self.create_time = datetime.fromtimestamp(card['createdAt'])
-        self.modify_time = datetime.fromtimestamp(card['lastModified'])
-        self.delete_time = datetime.fromtimestamp(card['deletedAt'])
-        self.target_time = datetime.fromtimestamp(card['duedate'])   # Due date of the card
+        self.creation_time = datetime.fromtimestamp(card['createdAt'])
+        self.last_edited_time = datetime.fromtimestamp(card['lastModified'])
+        self.deletion_time = datetime.fromtimestamp(card['deletedAt'])
+        self.card_due_time = datetime.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z')
 
         # Users
         self.assignees = [DeckUser(assignee) for assignee in card['assignedUsers']]
-        self.creator = DeckUser(card['owner'])  # TODO: differentiate between full json...
-        self.last_editor = None if card['lastEditor'] is None else DeckUser(card['lastEditor']) # TODO: ... and string
+        self.creator = DeckUser(card['owner'])
+
+        # NOTE: This is just the UUID/PK of the user not the entire structure
+        # TODO: Figure out wether this is a UUID or PK
+        self.last_editor = card['lastEditor']
 
 
 class DeckStack:
@@ -72,7 +73,7 @@ class DeckStack:
         self.__id = stack['id']
         self.__tag = stack['ETag']
 
-        self.last_edit_time = stack['lastModified']
+        self.last_edited_time = stack['lastModified']
         self.order = stack['order']
         self.title = stack['title']
 
@@ -103,7 +104,7 @@ class DeckBoard:
 
         # Timestamps for deletion and last edit. Deletion timestamp is 0 if the board has not been deleted
         self.deletion_time = None if board['deletedAt'] == 0 else datetime.fromtimestamp(board['deletedAt'])
-        self.last_edit_time = None if board['lastModified'] == 0 else datetime.fromtimestamp(board['lastModified'])
+        self.last_edited_time = None if board['lastModified'] == 0 else datetime.fromtimestamp(board['lastModified'])
 
         self.stacks = [DeckStack(stack) for stack in stacks]    # Non-empty stacks of the board
 
