@@ -279,7 +279,8 @@ class Deck:
         return result
 
 
-def main():
+# Test basic program functionality
+if __name__ == '__main__':
     hostname = os.environ.get("OC_DECK_HOST")
     username = os.environ.get('OC_DECK_USER')
     password = os.environ.get('OC_DECK_PASS')
@@ -287,7 +288,3 @@ def main():
 
     deck = Deck(hostname, username, password, security)
     print(deck)
-
-
-if __name__ == '__main__':
-    main()
