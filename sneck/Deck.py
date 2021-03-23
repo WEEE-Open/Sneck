@@ -82,7 +82,7 @@ class DeckCard:
         self.__tag = card['ETag']
 
         self.title = card['title']
-        self.description = card['description']
+        self.description = card['description'].strip()
         self.labels = [labels[label['ETag']] for label in card['labels']]
         self.type = card['type']
         self.attachments = [] if card['attachments'] is None else card['attachments']
@@ -105,9 +105,14 @@ class DeckCard:
         # TODO: Figure out whether this is a UUID or PK and in case it's the PK just get the DeckUser from dict
         self.last_editor = card['lastEditor']
 
+    def get_shortened_description(self, max: int) -> str:
+        result = " ".join([line for line in self.description.splitlines()])
+        maxlen = max if max > 0 else len(result)
+        return result[0:min(maxlen, len(result))].strip() + ('...' if maxlen < len(result) else '')
+
     def __str__(self) -> str:
         result = f'CARD "{self.title}":\n'
-        result += f'    Description: "{self.description.strip()}"\n'
+        result += f'    Description: "{self.get_shortened_description(50)}"\n'
         result += f'    Labels: {", ".join(label.title for label in self.labels)}\n'
         result += f'    Attachments: {"None" if len(self.attachments) == 0 else len(self.attachments)}\n'
         result += f'    Archived: {"Yes" if self.archived else "No"}\n'
@@ -182,6 +187,7 @@ class DeckBoard:
         result += f'    Archived: {self.archived}\n'
         result += f'    Shared to current user: {"No" if self.shared == 0 else "Yes"}\n'
         result += f'    Deleted: {"No" if self.deletion_time is None else f"Yes, at {self.deletion_time}"}\n'
+        result += f'    Owner: {self.owner}\n'
         result += f'    Last modification at {self.last_edited_time}\n'
 
         if len(self.labels) > 0:
