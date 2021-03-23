@@ -56,10 +56,10 @@ class DeckCard:
         self.creation_time = datetime.fromtimestamp(card['createdAt'])
         self.last_edited_time = datetime.fromtimestamp(card['lastModified'])
         self.deletion_time = datetime.fromtimestamp(card['deletedAt'])
-        self.card_due_time = datetime.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z')
+        self.card_due_time = None if card['duedate'] is None else datetime.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z')
 
         # Users
-        self.assignees = [DeckUser(assignee) for assignee in card['assignedUsers']]
+        self.assignees = [DeckUser(assignee['participant']) for assignee in card['assignedUsers']]
         self.creator = DeckUser(card['owner'])
 
         # NOTE: This is just the UUID/PK of the user not the entire structure
@@ -97,7 +97,7 @@ class DeckBoard:
 
         # Access control and permissions
         self.owner = DeckUser(board['owner'])
-        self.acl = DeckAcl(board['acl'])
+        self.acl = [DeckAcl(acl) for acl in board['acl']]
 
         self.archived = board['archived']   # Board archived by current user
         self.shared = board['shared']       # Board shared to the current user (not owned by current user)
@@ -258,7 +258,7 @@ class Deck:
         decoder = json.JSONDecoder()
 
         boards = decoder.decode(self.__api_request('boards'))
-        self.boards = [DeckBoard(b, self.__api_request(f'boards/{b["id"]}/stacks')) for b in boards]
+        self.boards = [DeckBoard(b, decoder.decode(self.__api_request(f'boards/{b["id"]}/stacks'))) for b in boards]
 
         # for b in boards:
         #   if not self.__is_outdated(b['title'], b['lastModified']) or b['deletedAt'] != 0 or b['title'] == 'Personal':
