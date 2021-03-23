@@ -17,23 +17,45 @@ class DeckUser:
 
         self.name = data['displayname']
 
+    def __str__(self) -> str:
+        # Name contains username, so returning only name is not ambiguous
+        return self.name
+
 
 class DeckAcl:
-    def __init__(self, data: dict):
+    def __init__(self, data: dict, users: dict):
         # Internal identifier and type of the ACL
         self.__id = data['id']
         self.__type = data['type']
+        self.__permissions = {'edit': data['permissionEdit'],
+                              'share': data['permissionShare'],
+                              'manage': data['permissionManage']}
 
-        # User this refers to
-        self.principal = DeckUser(data['participant'])
+        # ACLs are different wrt to user management than cards or every other object that contains DeckUsers
+        # While the list of users obtained with the "/boards?details=1" API call contains all effective users
+        # of the board, that is people that can create and modify content inside the board, ACLs can also contain
+        # groups. Groups get unrolled within the previous API call into the single participants, therefore ACL
+        # principals are not guaranteed to be in the DeckBoard.users dictionary. We remedy this by adding those
+        # principals to that dictionary in the event they are not found at ACL creation time.
+        if data['participant']['primaryKey'] not in users:
+            users[data['participant']['primaryKey']] = DeckUser(data['participant'])
+
+        self.principal = users[data['participant']['primaryKey']]
 
         # If the user is the owner of the entity
         self.owner = data['owner']
 
-        # Access rights
-        self.can_edit = data['permissionEdit']
-        self.can_share = data['permissionShare']
-        self.can_manage = data['permissionManage']
+    def can_edit(self) -> bool:
+        return self.__permissions['edit']
+
+    def can_share(self) -> bool:
+        return self.__permissions['share']
+
+    def can_manage(self) -> bool:
+        return self.__permissions['manage']
+
+    def __str__(self) -> str:
+        return str(self.principal) + f' [{",".join(k for k,v in self.__permissions.items() if v == True)}]'
 
 
 class DeckLabel:
@@ -49,16 +71,19 @@ class DeckLabel:
         self.color = label['color']
         self.last_edited_date = dt.fromtimestamp(label['lastModified'])
 
+    def __str__(self) -> str:
+        return f'{self.title} (#{self.color.upper()})'
+
 
 class DeckCard:
-    def __init__(self, card: dict):
+    def __init__(self, card: dict, labels: dict[DeckLabel], users: dict[DeckUser]):
         # Internal identifiers for the card
         self.__id = card['id']
         self.__tag = card['ETag']
 
         self.title = card['title']
         self.description = card['description']
-        self.labels = card['labels']
+        self.labels = [labels[label['ETag']] for label in card['labels']]
         self.type = card['type']
         self.attachments = [] if card['attachments'] is None else card['attachments']
         self.order = card['order']
@@ -73,16 +98,32 @@ class DeckCard:
         self.card_due_time = None if card['duedate'] is None else dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z')
 
         # Users
-        self.assignees = [DeckUser(assignee['participant']) for assignee in card['assignedUsers']]
-        self.creator = DeckUser(card['owner'])
+        self.assignees = [users[assignee['participant']['primaryKey']] for assignee in card['assignedUsers']]
+        self.creator = users[card['owner']['primaryKey']]
 
         # NOTE: This is just the UUID/PK of the user not the entire structure
-        # TODO: Figure out wether this is a UUID or PK
+        # TODO: Figure out wether this is a UUID or PK and in case it's the PK just get the DeckUser from dict
         self.last_editor = card['lastEditor']
+
+    def __str__(self) -> str:
+        result = f'CARD "{self.title}":\n'
+        result += f'    Description: "{self.description.strip()}"\n'
+        result += f'    Labels: {", ".join(label.title for label in self.labels)}\n'
+        result += f'    Attachments: {"None" if len(self.attachments) == 0 else len(self.attachments)}\n'
+        result += f'    Archived: {"Yes" if self.archived else "No"}\n'
+        result += f'    Due date: {self.card_due_time}\n'
+        result += f'    Creator: {self.creator}\n'
+        result += f'    Last edit at {self.last_edited_time} by {self.last_editor}\n'
+
+        if len(self.assignees) > 0:
+            result += '    ASSIGNEES:\n        '
+            result += '\n        '.join([str(assignee) for assignee in self.assignees])
+
+        return result
 
 
 class DeckStack:
-    def __init__(self, stack: dict):
+    def __init__(self, stack: dict, labels: dict[DeckLabel], users: dict[DeckUser]):
         # Internal identifiers for the board
         self.__id = stack['id']
         self.__tag = stack['ETag']
@@ -91,7 +132,15 @@ class DeckStack:
         self.order = stack['order']
         self.title = stack['title']
 
-        self.cards = [] if 'cards' not in stack else [DeckCard(card) for card in stack['cards']]
+        self.cards = [] if 'cards' not in stack else [DeckCard(card, labels, users) for card in stack['cards']]
+
+    def __str__(self) -> str:
+        result = f'STACK "{self.title}"\n'
+
+        for card in self.cards:
+            result += ('\n'.join(['    ' + line for line in str(card).splitlines()])) + '\n'
+
+        return result
 
 
 class DeckBoard:
@@ -101,26 +150,59 @@ class DeckBoard:
         self.__tag = board['ETag']
 
         # Internal data to be exposed through accessors
-        self.__permissions = board['permissions']                       # Permissions for this user (r,w,share,manage)
+        self.__permissions = board['permissions']  # Permissions for this user (r,w,share,manage)
         self.__notification_settings = board['settings']['notify-due']  # Notification settings for board
-        self.__synchronize = board['settings']['calendar']              # Whether the board synchronizes with CalDAV
+        self.__synchronize = board['settings']['calendar']  # Whether the board synchronizes with CalDAV
 
         self.title = board['title']
         self.color = board['color']
-        self.labels = board['labels']
+        self.labels = {label['ETag']: DeckLabel(label) for label in board['labels']}
 
-        # Access control and permissions
-        self.owner = DeckUser(board['owner'])
-        self.acl = [DeckAcl(acl) for acl in board['acl']]
+        # Users and access control
+        self.users = {user['primaryKey']: DeckUser(user) for user in board['users']}
+        self.owner = self.users[board['owner']['primaryKey']]
+        self.acl = [DeckAcl(acl, self.users) for acl in board['acl']]
 
-        self.archived = board['archived']   # Board archived by current user
-        self.shared = board['shared']       # Board shared to the current user (not owned by current user)
+        self.archived = board['archived']  # Board archived by current user
+        self.shared = board['shared']  # Board shared to the current user (not owned by current user)
 
         # Timestamps for deletion and last edit. Deletion timestamp is 0 if the board has not been deleted
         self.deletion_time = None if board['deletedAt'] == 0 else dt.fromtimestamp(board['deletedAt'])
         self.last_edited_time = None if board['lastModified'] == 0 else dt.fromtimestamp(board['lastModified'])
 
-        self.stacks = [DeckStack(stack) for stack in stacks]    # Non-empty stacks of the board
+        self.stacks = [DeckStack(stack, self.labels, self.users) for stack in stacks]  # Non-empty stacks of the board
+
+    def __str__(self):
+        result = ''
+
+        result += f'BOARD "{self.title}"\n'
+        result += f'    Color: #{self.color.upper()}\n'
+        result += f'    Archived: {self.archived}\n'
+        result += f'    Shared to current user: {"No" if self.shared == 0 else "Yes"}\n'
+        result += f'    Deleted: {"No" if self.deletion_time is None else f"Yes, at {self.deletion_time}"}\n'
+        result += f'    Last modification at {self.last_edited_time}\n'
+
+        if len(self.labels) > 0:
+            result += f'\n    LABELS:'
+            for label in self.labels.values():
+                result += f'\n        {str(label)}'
+            result += '\n'
+
+        if len(self.users) > 0:
+            result += f'\n    USERS:'
+            for user in self.users.values():
+                result += f'\n        {str(user)}'
+            result += '\n'
+
+        if len(self.acl) > 0:
+            result += f'\n    ACL:'
+            for acl in self.acl:
+                result += f'\n        {str(acl)}'
+            result += '\n'
+
+        result += '\n'.join([str(stack) for stack in self.stacks])
+
+        return result
 
     def can_read(self):
         return self.__permissions['PERMISSION_READ']
@@ -171,7 +253,7 @@ class Deck:
     def download(self):
         d = json.JSONDecoder()
 
-        boards = d.decode(self.__api_request('boards'))
+        boards = d.decode(self.__api_request('boards?details=1'))
         self.boards = {b['ETag']: DeckBoard(b, d.decode(self.__api_request(f'boards/{b["id"]}/stacks')))
                        for b in boards if b['deletedAt'] == 0 and b['title'] != 'Personal'}
 
@@ -197,13 +279,8 @@ def main():
 
     deck = Deck(hostname, username, password, security)
 
-    for board in deck.boards:
-        print(f'BOARD "{board.title}"')
-        print(f'   Color: #{board.color.upper()}')
-        print(f'   Archived: {board.archived}')
-        print(f'   Shared to current user: {"No" if board.shared == 0 else "Yes"}')
-        print(f'   Deleted: {"No" if board.deletion_time is None else f"Yes, at {board.deletion_time}"}')
-        print(f'   Last modification at {board.last_edited_time}\n')
+    for b in deck.boards.values():
+        print(b)
 
 
 if __name__ == '__main__':
