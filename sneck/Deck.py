@@ -36,6 +36,20 @@ class DeckAcl:
         self.can_manage = data['permissionManage']
 
 
+class DeckLabel:
+    def __init__(self, label: dict):
+        # Internal identifiers for the label
+        self.__id = label['id']
+        self.__tag = label['ETag']
+
+        # Not sure about what this is? We'll store it but keep it private and not expose it for now...
+        self.__card_id = label['cardId']
+
+        self.title = label['title']
+        self.color = label['color']
+        self.last_edited_date = dt.fromtimestamp(label['lastModified'])
+
+
 class DeckCard:
     def __init__(self, card: dict):
         # Internal identifiers for the card
