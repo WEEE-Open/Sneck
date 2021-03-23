@@ -158,8 +158,8 @@ class Deck:
         d = json.JSONDecoder()
 
         boards = d.decode(self.__api_request('boards'))
-        self.boards = [DeckBoard(b, d.decode(self.__api_request(f'boards/{b["id"]}/stacks')))
-                       for b in boards if b['deletedAt'] == 0 and b['title'] != 'Personal']
+        self.boards = {b['ETag']: DeckBoard(b, d.decode(self.__api_request(f'boards/{b["id"]}/stacks')))
+                       for b in boards if b['deletedAt'] == 0 and b['title'] != 'Personal'}
 
     def get_all_cards(self) -> list:
         result = []
@@ -185,6 +185,11 @@ def main():
 
     for board in deck.boards:
         print(f'BOARD "{board.title}"')
+        print(f'   Color: #{board.color.upper()}')
+        print(f'   Archived: {board.archived}')
+        print(f'   Shared to current user: {"No" if board.shared == 0 else "Yes"}')
+        print(f'   Deleted: {"No" if board.deletion_time is None else f"Yes, at {board.deletion_time}"}')
+        print(f'   Last modification at {board.last_edited_time}\n')
 
 
 if __name__ == '__main__':
