@@ -5,7 +5,7 @@ import logging
 
 from typing import Optional
 from requests.auth import HTTPBasicAuth
-from datetime import datetime
+from datetime import datetime as dt
 
 
 class DeckUser:
@@ -53,10 +53,10 @@ class DeckCard:
         self.overdue = card['overdue']
 
         # Timestamps
-        self.creation_time = datetime.fromtimestamp(card['createdAt'])
-        self.last_edited_time = datetime.fromtimestamp(card['lastModified'])
-        self.deletion_time = datetime.fromtimestamp(card['deletedAt'])
-        self.card_due_time = None if card['duedate'] is None else datetime.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z')
+        self.creation_time = dt.fromtimestamp(card['createdAt'])
+        self.last_edited_time = dt.fromtimestamp(card['lastModified'])
+        self.deletion_time = dt.fromtimestamp(card['deletedAt'])
+        self.card_due_time = None if card['duedate'] is None else dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z')
 
         # Users
         self.assignees = [DeckUser(assignee['participant']) for assignee in card['assignedUsers']]
@@ -103,8 +103,8 @@ class DeckBoard:
         self.shared = board['shared']       # Board shared to the current user (not owned by current user)
 
         # Timestamps for deletion and last edit. Deletion timestamp is 0 if the board has not been deleted
-        self.deletion_time = None if board['deletedAt'] == 0 else datetime.fromtimestamp(board['deletedAt'])
-        self.last_edited_time = None if board['lastModified'] == 0 else datetime.fromtimestamp(board['lastModified'])
+        self.deletion_time = None if board['deletedAt'] == 0 else dt.fromtimestamp(board['deletedAt'])
+        self.last_edited_time = None if board['lastModified'] == 0 else dt.fromtimestamp(board['lastModified'])
 
         self.stacks = [DeckStack(stack) for stack in stacks]    # Non-empty stacks of the board
 
@@ -154,115 +154,12 @@ class Deck:
         if self.boards is None:
             return True
 
-        if title in self.boards and self.boards[title].last_edit == timestamp:
-            return False
-        else:
-            return True
-
-    def __parse_user(self, user_json: dict) -> DeckUser:
-        index = user_json if isinstance(user_json, str) else user_json['primaryKey']
-        if index not in self.users:
-            pkey = index
-            uuid = user_json['uid']
-            nick = user_json['displayname']
-            utype = user_json['type']
-
-            self.users[pkey] = DeckUser(pkey, uuid, utype, nick)
-        return self.users[index]
-
-    def __parse_acls(self, acls_json) -> list:
-        return [self.__parse_acl(acl_json) for acl_json in acls_json]
-
-    def __parse_acl(self, acl_json: dict):
-        user = self.__parse_user(acl_json['participant'])
-        owner = acl_json['owner']
-        edit = acl_json['owner']
-        share = acl_json['owner']
-        manage = acl_json['owner']
-        atype = acl_json['type']
-        aid = acl_json['id']
-        return DeckAcl(aid, user, atype, edit, share, manage, owner)
-
-    def __parse_card(self, data: dict):
-        cid = data['id']
-        tag = data['ETag']
-        title = data['title']
-        descr = data['description']
-        labels = data['labels']
-        ctype = data['type']
-        attachments = data['attachments']
-
-        create = datetime.fromtimestamp(data['createdAt'])
-        delete = datetime.fromtimestamp(data['deletedAt'])
-        modify = datetime.fromtimestamp(data['lastModified'])
-
-        target = None if data['duedate'] is None else datetime.strptime(data['duedate'], '%Y-%m-%dT%H:%M:%S%z')
-
-        assignees = [self.__parse_user(d['participant']) for d in data['assignedUsers']]
-        owner = self.__parse_user(data['owner'])
-        editor = None if data['lastEditor'] is None else self.__parse_user(data['lastEditor'])
-
-        order = data['order']
-        archived = data['archived']
-        unread = data['commentsUnread']
-        overdue = data['overdue']
-
-        return DeckCard(cid, tag, title, descr, labels, ctype, attachments, create, modify, delete, target, assignees,
-                        owner, editor, order, archived, unread, overdue)
-
-    def __parse_cards(self, data: list):
-        return [self.__parse_card(d) for d in data]
-
-    def __parse_stack(self, data: dict):
-        sid = data['id']
-        tag = data['ETag']
-        order = data['order']
-        modify = datetime.fromtimestamp(data['lastModified'])
-        title = data['title']
-        cards = None if 'cards' not in data else self.__parse_cards(data['cards'])
-
-        return DeckStack(sid, tag, modify, order, title, cards)
-
-    def __parse_stacks(self, data: list):
-        return [self.__parse_stack(d) for d in data]
-
-    def __parse_board(self, board_json: dict) -> DeckBoard:
-        bid = board_json['id']
-        tag = board_json['ETag']
-
-        permissions = list(board_json['permissions'].values())
-
-        notifications = board_json['settings']['notify-due']
-        calendar = board_json['settings']['calendar']
-
-        title = board_json['title']
-        color = board_json['color']
-        labels = board_json['labels']
-
-        # ACL and owner of the board
-        acl = self.__parse_acls(board_json['acl'])
-        owner = self.__parse_user(board_json['owner'])
-
-        archived = board_json['archived']
-        shared = board_json['shared']
-
-        delete = datetime.fromtimestamp(board_json['deletedAt'])
-        modify = datetime.fromtimestamp(board_json['lastModified'])
-
-        stacks = self.__parse_stacks(json.JSONDecoder().decode(self.__api_request(f'boards/{bid}/stacks')))
-
-        return DeckBoard(bid, tag, permissions, stacks, calendar, title, shared, acl, archived, color, labels, owner,
-                         delete, modify, notifications)
-
     def download(self):
-        decoder = json.JSONDecoder()
+        d = json.JSONDecoder()
 
-        boards = decoder.decode(self.__api_request('boards'))
-        self.boards = [DeckBoard(b, decoder.decode(self.__api_request(f'boards/{b["id"]}/stacks'))) for b in boards]
-
-        # for b in boards:
-        #   if not self.__is_outdated(b['title'], b['lastModified']) or b['deletedAt'] != 0 or b['title'] == 'Personal':
-        #        continue
+        boards = d.decode(self.__api_request('boards'))
+        self.boards = [DeckBoard(b, d.decode(self.__api_request(f'boards/{b["id"]}/stacks')))
+                       for b in boards if b['deletedAt'] == 0 and b['title'] != 'Personal']
 
     def get_all_cards(self) -> list:
         result = []
@@ -284,8 +181,10 @@ def main():
     password = os.environ.get('OC_DECK_PASS')
     security = os.environ.get('OC_USE_HTTPS') == 'True'
 
-    dw = Deck(hostname, username, password, security)
-    pass
+    deck = Deck(hostname, username, password, security)
+
+    for board in deck.boards:
+        print(f'BOARD "{board.title}"')
 
 
 if __name__ == '__main__':
