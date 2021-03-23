@@ -102,7 +102,7 @@ class DeckCard:
         self.creator = users[card['owner']['primaryKey']]
 
         # NOTE: This is just the UUID/PK of the user not the entire structure
-        # TODO: Figure out wether this is a UUID or PK and in case it's the PK just get the DeckUser from dict
+        # TODO: Figure out whether this is a UUID or PK and in case it's the PK just get the DeckUser from dict
         self.last_editor = card['lastEditor']
 
     def __str__(self) -> str:
@@ -113,7 +113,9 @@ class DeckCard:
         result += f'    Archived: {"Yes" if self.archived else "No"}\n'
         result += f'    Due date: {self.card_due_time}\n'
         result += f'    Creator: {self.creator}\n'
-        result += f'    Last edit at {self.last_edited_time} by {self.last_editor}\n'
+
+        if self.last_editor is not None:
+            result += f'    Last edit at {self.last_edited_time} by {self.last_editor}\n'
 
         if len(self.assignees) > 0:
             result += '    ASSIGNEES:\n        '
@@ -183,24 +185,21 @@ class DeckBoard:
         result += f'    Last modification at {self.last_edited_time}\n'
 
         if len(self.labels) > 0:
-            result += f'\n    LABELS:'
+            result += f'    LABELS:\n'
             for label in self.labels.values():
-                result += f'\n        {str(label)}'
-            result += '\n'
+                result += ('\n'.join(['        ' + line for line in str(label).splitlines()])) + '\n'
 
         if len(self.users) > 0:
-            result += f'\n    USERS:'
+            result += f'    USERS:\n'
             for user in self.users.values():
-                result += f'\n        {str(user)}'
-            result += '\n'
+                result += ('\n'.join(['        ' + line for line in str(user).splitlines()])) + '\n'
 
         if len(self.acl) > 0:
-            result += f'\n    ACL:'
+            result += f'    ACL:\n'
             for acl in self.acl:
-                result += f'\n        {str(acl)}'
-            result += '\n'
+                result += ('\n'.join(['        ' + line for line in str(acl).splitlines()])) + '\n'
 
-        result += '\n'.join([str(stack) for stack in self.stacks])
+        result += '\n'.join(['    ' + line for stack in self.stacks for line in str(stack).splitlines()])
 
         return result
 
@@ -231,6 +230,9 @@ class Deck:
         self.users = {}
 
         self.download()
+
+    def __str__(self):
+        return '\n\n'.join([str(board) for board in self.boards.values()])
 
     def __api_request(self, api_bindpost: str) -> json:
         logging.debug(f'Making request {self.__api_base + api_bindpost}...')
@@ -278,9 +280,7 @@ def main():
     security = os.environ.get('OC_USE_HTTPS') == 'True'
 
     deck = Deck(hostname, username, password, security)
-
-    for b in deck.boards.values():
-        print(b)
+    print(deck)
 
 
 if __name__ == '__main__':
