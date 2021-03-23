@@ -149,6 +149,13 @@ class DeckStack:
 
         return result
 
+    def get_next_event(self) -> Optional[DeckCard]:
+        result = None
+        for card in self.cards:
+            if result is None or (card.card_due_time is not None and card.card_due_time < result.card_due_time):
+                result = card
+
+        return result
 
 class DeckBoard:
     def __init__(self, board: dict, stacks: list):
@@ -209,6 +216,15 @@ class DeckBoard:
 
         return result
 
+    def get_next_event(self) -> Optional[DeckCard]:
+        result = None
+        for stack in self.stacks:
+            test = stack.get_next_event()
+            if result is None or (test.card_due_time is not None and test.card_due_time < result.card_due_time):
+                result = test
+
+        return result
+
     def can_read(self):
         return self.__permissions['PERMISSION_READ']
 
@@ -265,17 +281,13 @@ class Deck:
         self.boards = {b['ETag']: DeckBoard(b, d.decode(self.__api_request(f'boards/{b["id"]}/stacks')))
                        for b in boards if b['deletedAt'] == 0 and b['title'] != 'Personal'}
 
-    def get_all_cards(self) -> list:
-        result = []
-        for board in self.boards.values():
-            for stack in board.stacks.values():
-                result += list(stack.cards.values())
-        return result
+    def get_next_event(self) -> Optional[DeckCard]:
+        result = None
+        for board in self.boards:
+            test = board.get_next_event()
+            if result is None or (test.card_due_time is not None and test.card_due_time < result.card_due_time):
+                result = test
 
-    def get_all_stacks(self) -> list:
-        result = []
-        for board in self.boards.values():
-            result += list(board.stacks.values())
         return result
 
 
