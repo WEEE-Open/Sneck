@@ -152,10 +152,11 @@ class DeckStack:
     def get_next_event(self) -> Optional[DeckCard]:
         result = None
         for card in self.cards:
-            if result is None or (card.card_due_time is not None and card.card_due_time < result.card_due_time):
+            if card and card.card_due_time and (not result or (result and result.card_due_time > card.card_due_time)):
                 result = card
 
         return result
+
 
 class DeckBoard:
     def __init__(self, board: dict, stacks: list):
@@ -219,9 +220,9 @@ class DeckBoard:
     def get_next_event(self) -> Optional[DeckCard]:
         result = None
         for stack in self.stacks:
-            test = stack.get_next_event()
-            if result is None or (test.card_due_time is not None and test.card_due_time < result.card_due_time):
-                result = test
+            card = stack.get_next_event()
+            if card and (not result or (result and result.card_due_time > card.card_due_time)):
+                result = card
 
         return result
 
@@ -266,8 +267,8 @@ class Deck:
             logging.error(f'Request failed [Return code: {response.status_code}]!')
             logging.error(f'Unable to download deck content from API {self.__api_base + api_bindpost}')
 
-            return
-        print(response.text)
+            return None
+
         return response.text
 
     def __is_outdated(self, title: str, timestamp: int):
@@ -281,12 +282,14 @@ class Deck:
         self.boards = {b['ETag']: DeckBoard(b, d.decode(self.__api_request(f'boards/{b["id"]}/stacks')))
                        for b in boards if b['deletedAt'] == 0 and b['title'] != 'Personal'}
 
+        self.next_event = self.get_next_event()
+
     def get_next_event(self) -> Optional[DeckCard]:
         result = None
-        for board in self.boards:
-            test = board.get_next_event()
-            if result is None or (test.card_due_time is not None and test.card_due_time < result.card_due_time):
-                result = test
+        for board in self.boards.values():
+            card = board.get_next_event()
+            if card and (not result or (result and result.card_due_time > card.card_due_time)):
+                result = card
 
         return result
 
