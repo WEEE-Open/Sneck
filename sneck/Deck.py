@@ -280,10 +280,6 @@ class Deck:
 
         return response.text
 
-    def __is_outdated(self, title: str, timestamp: int):
-        if self.boards is None:
-            return True
-
     def download(self):
         d = json.JSONDecoder()
 
