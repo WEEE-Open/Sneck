@@ -8,6 +8,29 @@ from requests.auth import HTTPBasicAuth
 from datetime import datetime as dt, timezone as tz
 
 
+class DeckAPI:
+    def __init__(self, username: str, password: str, hostname: str, secure: bool):
+        self.__api_base = f'{"https" if secure else "http"}://{hostname}/index.php/apps/deck/api/v1.0/'
+        self.__username = username
+        self.__password = password
+        self.__decoder = json.decoder.JSONDecoder()
+
+    def request(self, binding: str) -> [list, dict]:
+        logging.debug(f'Making request {self.__api_base + binding}...')
+        response = requests.get(self.__api_base + binding,
+                                headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
+                                auth=HTTPBasicAuth(self.__username, self.__password))
+
+        # TODO: Actually handle something?
+        if not response.ok:
+            logging.error(f'Request failed [Return code: {response.status_code}]!')
+            logging.error(f'Unable to download deck content from API {self.__api_base + binding}')
+
+            return None
+
+        return self.__decoder.decode(response.text)
+
+
 class DeckUser:
     def __init__(self, data: dict):
         # Internal user identifiers and types
@@ -88,11 +111,14 @@ class DeckCard:
         self.description = card['description'].strip()
         self.labels = [labels[label['ETag']] for label in card['labels']]
         self.type = card['type']
-        self.attachments = [] if card['attachments'] is None else card['attachments']
-        self.order = card['order']
-        self.archived = card['archived']
-        self.unread_comments = card['commentsUnread']
-        self.overdue = card['overdue']
+
+        attachment_count = card['attachmentCount']
+        if attachment_count > 0:
+            attachment_data = card['attachments']
+        else:
+
+
+            self.attachments = []
 
         # Timestamps
         self.creation_time = dt.fromtimestamp(card['createdAt']).astimezone(tz.utc)
@@ -201,7 +227,7 @@ class DeckStack:
 
 
 class DeckBoard:
-    def __init__(self, board: dict, stacks: list):
+    def __init__(self, board: dict, api: DeckAPI):
         # Internal identifiers for the board
         self.__id = board['id']
         self.__tag = board['ETag']
@@ -231,7 +257,8 @@ class DeckBoard:
         self.last_edited_time = None if board['lastModified'] == 0 else \
             dt.fromtimestamp(board['lastModified']).astimezone(tz.utc)
 
-        self.stacks = [DeckStack(stack, self.labels, self.users) for stack in stacks]  # Non-empty stacks of the board
+        stacks = api.request(f'boards/{self.__id}/stacks')
+        self.stacks = [DeckStack(stack, self.labels, self.users) for stack in stacks]
 
     def __str__(self):
         result = ''
@@ -295,14 +322,14 @@ class DeckBoard:
 
     # TODO: Order them. Add filters (label, other?)
     def get_cards(self) -> list[DeckCard]:
-        return [card for stack in self.stacks for card in stack]
+        return [card for stack in self.stacks for card in stack.get_cards()]
 
 
 class Deck:
     def __init__(self, domain: str, username: str, password: str, secure: bool):
-        self.__api_base = f'{"https" if secure else "http"}://{domain}/index.php/apps/deck/api/v1.0/'
         self.__username = username
         self.__password = password
+        self.__api = DeckAPI(username, password, domain, secure)
 
         self.next_event = None
         self.boards = {}
@@ -312,20 +339,6 @@ class Deck:
 
     def __str__(self):
         return '\n\n'.join([str(board) for board in self.boards.values()])
-
-    def __api_request(self, api_bindpost: str) -> json:
-        logging.debug(f'Making request {self.__api_base + api_bindpost}...')
-        response = requests.get(self.__api_base + api_bindpost,
-                                headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
-                                auth=HTTPBasicAuth(self.__username, self.__password))
-
-        if not response.ok:
-            logging.error(f'Request failed [Return code: {response.status_code}]!')
-            logging.error(f'Unable to download deck content from API {self.__api_base + api_bindpost}')
-
-            return None
-
-        return response.text
 
     def __search_next_event(self) -> Optional[DeckCard]:
         result = None
@@ -339,11 +352,8 @@ class Deck:
         return result
 
     def download(self):
-        d = json.JSONDecoder()
-
-        boards = d.decode(self.__api_request('boards?details=1'))
-        self.boards = {b['ETag']: DeckBoard(b, d.decode(self.__api_request(f'boards/{b["id"]}/stacks')))
-                       for b in boards if b['deletedAt'] == 0} # and b['title'] != 'Personal'}
+        boards = self.__api.request('boards?details=1')
+        self.boards = {b['ETag']: DeckBoard(b, self.__api) for b in boards if b['deletedAt'] == 0}
 
         self.next_event = self.__search_next_event()
 
