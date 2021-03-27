@@ -1,8 +1,9 @@
 from typing import Optional
 
-from Deck import Deck,DeckBoard,DeckStack,DeckCard
-from threading import Thread,Condition
-from datetime import datetime
+from Deck import Deck, DeckBoard, DeckStack, DeckCard
+from threading import Thread, Condition
+from datetime import datetime, timezone
+import logging
 
 
 class DeckManager:
@@ -15,8 +16,6 @@ class DeckManager:
         self.__nevent_lock = Condition()
         self.__access_lock = Condition()
 
-        self.__next_event = None
-
         # Do all the timed checks in two separate threads
         self.__update_thread = Thread(target=self.__update, args=(cooldown,), daemon=True)
         self.__events_thread = Thread(target=self.__events, args=(callback,), daemon=True)
@@ -28,60 +27,59 @@ class DeckManager:
         self.__update_lock.notify()
 
     def __update(self, cooldown: int):
-        print('Updating...')
+        logging.info('[UT] Starting update thread...')
         self.__update_lock.acquire()
+        logging.debug('[UT] Acquired update lock.')
 
         while True:
-            self.__deck.download()
-
-            if self.__next_event is not None:
-                old_date = datetime.strptime(self.__next_event.date, '%Y-%m-%dT%H:%M:%S%z')
-            else:
-                old_date = None
-
-
-            self.__nevent_lock.acquire()
-            self.__next_event_card = self.__deck.next_event
-            self.__nevent_lock.release()
-
-            if self.__next_event is not None:
-                new_date = datetime.strptime(self.__next_event.date, '%Y-%m-%dT%H:%M:%S%z')
-            else:
-                new_date = None
-
-            if old_date and new_date and new_date < old_date:
-                self.__notify_lock.notify()
-
             self.__update_lock.wait(cooldown)
+
+            prev = self.__deck.get_next_event()
+
+            logging.debug('[UT] Downloading deck data from server...')
+            self.__deck.download()
+            logging.debug('[UT] Downloaded deck data from server.')
+
+            curr = self.__deck.get_next_event()
+
+            if (not prev and curr) or (curr and not prev) or (curr and curr.card_due_time != prev.card_due_time):
+                logging.info(f'[UT] Next event {f"changed to {curr}" if curr else "got deleted"}.')
+                self.__notify_lock.acquire()
+                self.__notify_lock.notify()
+                self.__notify_lock.release()
 
     def __events(self, callback):
         self.__notify_lock.acquire()
 
         while True:
-            if self.__next_event is not None:
-                delay = (datetime.now() - datetime.strptime(self.__next_event.date, '%Y-%m-%dT%H:%M:%S%z')).seconds
+            if self.__deck.next_event is not None:
+                print(f'Waiting for next event at {self.__deck.next_event.card_due_time}')
+                delay = (self.__deck.next_event.card_due_time - datetime.now(timezone.utc)).seconds
+                logging.debug(f'[NT] Waiting on notification lock with delay of {delay} seconds.')
                 self.__notify_lock.wait(delay)
             else:
                 self.__notify_lock.wait()
 
-            if datetime.now == self.get_next_reminder():
+            if datetime.now == self.__deck.next_event.card_due_time:
                 callback(self.get_next_card())
 
 
-def callback(card: DeckCard):
+def c(card: DeckCard):
     pass
 
 
 # Test basic program functionality
 if __name__ == '__main__':
-    import os,time
+    import os
+    import time
 
     hostname = os.environ.get("OC_DECK_HOST")
     username = os.environ.get('OC_DECK_USER')
     password = os.environ.get('OC_DECK_PASS')
     security = os.environ.get('OC_USE_HTTPS') == 'True'
 
-    manager = DeckManager(hostname, username, password, security, 30, callback)
+    logging.basicConfig(level=logging.DEBUG)
+    manager = DeckManager(hostname, username, password, security, 30, c)
 
     while True:
         time.sleep(9999999)
