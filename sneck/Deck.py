@@ -101,6 +101,31 @@ class DeckLabel:
         return self.title
 
 
+class DeckAttachment:
+    def __init__(self, attachment: dict):
+        self.__id = attachment['id']
+        self.__type = attachment['type']
+        self.__data = attachment['data']
+        self.__size = attachment['extendedData']['filesize']
+        self.__mime = attachment['extendedData']['mimetype']
+        self.__name = {'dir': attachment['extendedData']['info']['dirname'],
+                       'name': attachment['extendedData']['info']['filename'],
+                       'ext': attachment['extendedData']['info']['extension']}
+
+        # TODO: Is this the primary key or UUID? If the former, use it to retrieve actual DeckUser
+        self.__owner = attachment['createdBy']
+
+        self.__creation_time = dt.fromtimestamp(attachment['createdAt']).astimezone(tz.utc)
+        self.__last_edit_time = dt.fromtimestamp(attachment['lastModified']).astimezone(tz.utc)
+        self.__deletion_time = dt.fromtimestamp(attachment['deletedAt']).astimezone(tz.utc)
+
+    def __str__(self) -> str:
+        return f'ATTACHMENT {".".join([self.__name["name"], self.__name["ext"]])} ({self.__size} byte)'
+
+    def get_id(self) -> int:
+        return self.__id
+
+
 class DeckCard:
     def __init__(self, card: dict, bid: int, sid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI):
         # Internal identifiers for the card
@@ -118,7 +143,7 @@ class DeckCard:
         attachment_count = card['attachmentCount']
         if attachment_count > 0:
             attachments = api.request(f'boards/{bid}/stacks/{sid}/cards/{self.__id}/attachments')
-            print(attachments)
+            self.attachments = [DeckAttachment(attachment) for attachment in attachments]
         else:
             self.attachments = []
 
@@ -154,6 +179,10 @@ class DeckCard:
         if len(self.assignees) > 0:
             result += '    ASSIGNEES:\n        '
             result += '\n        '.join([str(assignee) for assignee in self.assignees])
+
+        if len(self.attachments) > 0:
+            result += '    ATTACHMENTS:\n        '
+            result += '\n        '.join([str(attachment) for attachment in self.attachments])
 
         return result
 
