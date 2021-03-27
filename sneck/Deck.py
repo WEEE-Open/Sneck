@@ -27,7 +27,7 @@ class DeckAPI:
             logging.error(f'Unable to download deck content from API {self.__api_base + binding}')
 
             return None
-
+        print(response.text)
         return self.__decoder.decode(response.text)
 
 
@@ -43,6 +43,9 @@ class DeckUser:
     def __str__(self) -> str:
         # Name contains username, so returning only name is not ambiguous
         return self.name
+
+    def __repr__(self) -> str:
+        return self.__pkey
 
 
 class DeckAcl:
@@ -279,82 +282,151 @@ class DeckBoard:
         self.__id = board['id']
         self.__tag = board['ETag']
 
-        # Internal data to be exposed through accessors
+        # Internal boaard settings
         self.__permissions = board['permissions']  # Permissions for this user (r,w,share,manage)
+        # TODO: These are not documented, find possible values and their meaning and expose them accordingly
         self.__notification_settings = board['settings']['notify-due']  # Notification settings for board
         self.__synchronize = board['settings']['calendar']  # Whether the board synchronizes with CalDAV
 
-        self.title = board['title']
-        self.color = board['color']
-        self.labels = {label['ETag']: DeckLabel(label) for label in board['labels']}
+        self.__title = board['title']
+        self.__color = board['color']
+        self.__labels = {label['ETag']: DeckLabel(label) for label in board['labels']}
 
         # Users and access control
-        self.users = {user['primaryKey']: DeckUser(user) for user in board['users']}
-        self.owner = self.users[board['owner']['primaryKey']]
-        self.acl = [DeckAcl(acl, self.users) for acl in board['acl']]
+        self.__users = {user['primaryKey']: DeckUser(user) for user in board['users']}
+        self.__owner = self.__users[board['owner']['primaryKey']]
+        self.__acl = [DeckAcl(acl, self.__users) for acl in board['acl']]
 
-        self.archived = board['archived']  # Board archived by current user
-        self.shared = board['shared']  # Board shared to the current user (not owned by current user)
+        self.__archived = board['archived']  # Board archived by current user
+        self.__shared = board['shared']  # Board shared to the current user (not owned by current user)
 
         # Timestamps for deletion and last edit. Deletion timestamp is 0 if the board has not been deleted
 
         # TODO: Fix this obscenity without breaking PEP8, somehow
-        self.deletion_time = None if board['deletedAt'] == 0 else \
+        self.__deletion_time = None if board['deletedAt'] == 0 else \
             dt.fromtimestamp(board['deletedAt']).astimezone(tz.utc)
-        self.last_edited_time = None if board['lastModified'] == 0 else \
+        self.__last_edited_time = None if board['lastModified'] == 0 else \
             dt.fromtimestamp(board['lastModified']).astimezone(tz.utc)
 
         stacks = api.request(f'boards/{self.__id}/stacks')
-        self.stacks = [DeckStack(stack, board['id'], self.labels, self.users, api) for stack in stacks]
+        self.__stacks = [DeckStack(stack, board['id'], self.__labels, self.__users, api) for stack in stacks]
 
     def __str__(self):
         result = ''
 
-        result += f'BOARD "{self.title}"\n'
-        result += f'    Color: #{self.color.upper()}\n'
-        result += f'    Archived: {self.archived}\n'
-        result += f'    Shared to current user: {"No" if self.shared == 0 else "Yes"}\n'
-        result += f'    Deleted: {"No" if self.deletion_time is None else f"Yes, at {self.deletion_time}"}\n'
-        result += f'    Owner: {self.owner}\n'
-        result += f'    Last modification at {self.last_edited_time}\n'
+        result += f'BOARD "{self.__title}"\n'
+        result += f'    Color: #{self.__color.upper()}\n'
+        result += f'    Archived: {self.__archived}\n'
+        result += f'    Shared to current user: {"No" if self.__shared == 0 else "Yes"}\n'
+        result += f'    Deleted: {"No" if self.__deletion_time is None else f"Yes, at {self.__deletion_time}"}\n'
+        result += f'    Owner: {self.__owner}\n'
+        result += f'    Last modification at {self.__last_edited_time}\n'
 
-        if len(self.labels) > 0:
+        if len(self.__labels) > 0:
             result += f'    LABELS:\n'
-            for label in self.labels.values():
+            for label in self.__labels.values():
                 result += ('\n'.join(['        ' + line for line in str(label).splitlines()])) + '\n'
 
-        if len(self.users) > 0:
+        if len(self.__users) > 0:
             result += f'    USERS:\n'
-            for user in self.users.values():
+            for user in self.__users.values():
                 result += ('\n'.join(['        ' + line for line in str(user).splitlines()])) + '\n'
 
-        if len(self.acl) > 0:
+        if len(self.__acl) > 0:
             result += f'    ACL:\n'
-            for acl in self.acl:
+            for acl in self.__acl:
                 result += ('\n'.join(['        ' + line for line in str(acl).splitlines()])) + '\n'
 
-        result += '\n'.join(['    ' + line for stack in self.stacks for line in str(stack).splitlines()])
+        result += '\n'.join(['    ' + line for stack in self.__stacks for line in str(stack).splitlines()])
 
         return result
 
-    def can_read(self):
-        return self.__permissions['PERMISSION_READ']
+    def __repr__(self) -> str:
+        return self.__tag
 
-    def can_edit(self):
-        return self.__permissions['PERMISSION_READ']
+    def can_read(self, pk=None) -> bool:
+        if not pk:
+            return self.__permissions['PERMISSION_READ']
+        else:
+            for acl in self.__acl:
+                if repr(acl.principal) == pk:
+                    return True
+            return False
 
-    def can_manage(self):
-        return self.__permissions['PERMISSION_READ']
+    def can_edit(self, pk=None) -> bool:
+        if not pk:
+            return self.__permissions['PERMISSION_EDIT']
+        else:
+            for acl in self.__acl:
+                if repr(acl.principal) == pk:
+                    return acl.can_edit()
+            return False
 
-    def can_share(self):
-        return self.__permissions['PERMISSION_READ']
+    def can_manage(self, pk=None) -> bool:
+        if not pk:
+            return self.__permissions['PERMISSION_MANAGE']
+        else:
+            for acl in self.__acl:
+                if repr(acl.principal) == pk:
+                    return acl.can_manage()
+            return False
 
-    def deleted(self):
-        return self.deletion_time is not None
+    def can_share(self, pk=None) -> bool:
+        if not pk:
+            return self.__permissions['PERMISSION_SHARE']
+        else:
+            for acl in self.__acl:
+                if repr(acl.principal) == pk:
+                    return acl.can_share()
+            return False
+
+    def is_archived(self) -> bool:
+        return self.__archived
+
+    def is_shared(self) -> bool:
+        return self.__shared
+
+    def get_title(self) -> str:
+        return self.__title
+
+    def get_color(self) -> str:
+        return self.__color
+
+    def get_labels(self) -> list[DeckLabel]:
+        return [v for k, v in self.__labels.items()]
+
+    def get_users(self) -> list[DeckUser]:
+        return [v for k, v in self.__users.items()]
+
+    def get_owner(self) -> DeckUser:
+        return self.__owner
+
+    def get_deletion_time(self) -> Optional[dt]:
+        return self.__deletion_time
+
+    def get_last_modification_time(self) -> dt:
+        return self.__last_edited_time
+
+    # TODO: Order them. Add filters (which ones?)
+    def get_stacks(self) -> list[DeckStack]:
+        return self.__stacks
+
+    def get_stack(self, sid: int) -> Optional[DeckStack]:
+        for stack in self.__stacks:
+            if stack.get_id() == sid:
+                return stack
+        return None
+
+    # TODO: Order them. Add filters (label, other?)
+    def get_cards(self) -> list[DeckCard]:
+        return [card for stack in self.__stacks for card in stack.get_cards()]
+
+    def get_events(self) -> list[DeckCard]:
+        return [card for card in self.get_cards() if card.card_due_time and card.card_due_time >= dt.now(tz.utc)]
 
     def get_next_event(self) -> Optional[DeckCard]:
         result = None
-        for stack in self.stacks:
+        for stack in self.__stacks:
             card = stack.get_next_event()
             # TODO: Fix this obscenity without breaking PEP8, somehow
             if card and (not result or (result and result.card_due_time > card.card_due_time)) \
@@ -362,20 +434,6 @@ class DeckBoard:
                 result = card
 
         return result
-
-    # TODO: Order them. Add filters (which ones?)
-    def get_stacks(self) -> list[DeckStack]:
-        return self.stacks
-
-    def get_stack(self, sid: int) -> Optional[DeckStack]:
-        for stack in self.stacks:
-            if stack.get_id() == sid:
-                return stack
-        return None
-
-    # TODO: Order them. Add filters (label, other?)
-    def get_cards(self) -> list[DeckCard]:
-        return [card for stack in self.stacks for card in stack.get_cards()]
 
     def get_id(self) -> int:
         return self.__id
