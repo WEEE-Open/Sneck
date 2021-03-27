@@ -280,16 +280,7 @@ class Deck:
 
         return response.text
 
-    def download(self):
-        d = json.JSONDecoder()
-
-        boards = d.decode(self.__api_request('boards?details=1'))
-        self.boards = {b['ETag']: DeckBoard(b, d.decode(self.__api_request(f'boards/{b["id"]}/stacks')))
-                       for b in boards if b['deletedAt'] == 0} # and b['title'] != 'Personal'}
-
-        self.next_event = self.get_next_event()
-
-    def get_next_event(self) -> Optional[DeckCard]:
+    def __search_next_event(self) -> Optional[DeckCard]:
         result = None
         for board in self.boards.values():
             card = board.get_next_event()
@@ -298,6 +289,18 @@ class Deck:
                 result = card
 
         return result
+
+    def download(self):
+        d = json.JSONDecoder()
+
+        boards = d.decode(self.__api_request('boards?details=1'))
+        self.boards = {b['ETag']: DeckBoard(b, d.decode(self.__api_request(f'boards/{b["id"]}/stacks')))
+                       for b in boards if b['deletedAt'] == 0} # and b['title'] != 'Personal'}
+
+        self.next_event = self.__search_next_event()
+
+    def get_next_event(self) -> Optional[DeckCard]:
+        return self.next_event
 
 
 # Test basic program functionality
