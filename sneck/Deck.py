@@ -102,8 +102,10 @@ class DeckLabel:
 
 
 class DeckCard:
-    def __init__(self, card: dict, labels: dict[DeckLabel], users: dict[DeckUser]):
+    def __init__(self, card: dict, bid: int, sid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI):
         # Internal identifiers for the card
+        self.__board_id = bid
+        self.__stack_id = sid
         self.__id = card['id']
         self.__tag = card['ETag']
 
@@ -111,13 +113,13 @@ class DeckCard:
         self.description = card['description'].strip()
         self.labels = [labels[label['ETag']] for label in card['labels']]
         self.type = card['type']
+        self.archived = card['archived']
 
         attachment_count = card['attachmentCount']
         if attachment_count > 0:
-            attachment_data = card['attachments']
+            attachments = api.request(f'boards/{bid}/stacks/{sid}/cards/{self.__id}/attachments')
+            print(attachments)
         else:
-
-
             self.attachments = []
 
         # Timestamps
@@ -184,10 +186,14 @@ class DeckCard:
             # TODO: Throw an error
             return False
 
+    def get_id(self) -> int:
+        return self.__id
+
 
 class DeckStack:
-    def __init__(self, stack: dict, labels: dict[DeckLabel], users: dict[DeckUser]):
+    def __init__(self, stack: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI):
         # Internal identifiers for the board
+        self.__board_id = bid
         self.__id = stack['id']
         self.__tag = stack['ETag']
 
@@ -195,7 +201,10 @@ class DeckStack:
         self.order = stack['order']
         self.title = stack['title']
 
-        self.cards = [] if 'cards' not in stack else [DeckCard(card, labels, users) for card in stack['cards']]
+        if 'cards' in stack:
+            self.cards = [DeckCard(card, bid, stack['id'], labels, users, api) for card in stack['cards']]
+        else:
+            self.cards = []
 
     def __str__(self) -> str:
         result = f'STACK "{self.title}"\n'
@@ -215,6 +224,12 @@ class DeckStack:
     def get_cards(self) -> list[DeckCard]:
         return self.cards
 
+    def get_card(self, cid: int) -> Optional[DeckCard]:
+        for card in self.cards:
+            if card.get_id() == cid:
+                return card
+        return None
+
     def get_next_event(self) -> Optional[DeckCard]:
         result = None
         for card in self.cards:
@@ -224,6 +239,9 @@ class DeckStack:
                 result = card
 
         return result
+
+    def get_id(self) -> int:
+        return self.__id
 
 
 class DeckBoard:
@@ -258,7 +276,7 @@ class DeckBoard:
             dt.fromtimestamp(board['lastModified']).astimezone(tz.utc)
 
         stacks = api.request(f'boards/{self.__id}/stacks')
-        self.stacks = [DeckStack(stack, self.labels, self.users) for stack in stacks]
+        self.stacks = [DeckStack(stack, board['id'], self.labels, self.users, api) for stack in stacks]
 
     def __str__(self):
         result = ''
@@ -320,9 +338,18 @@ class DeckBoard:
     def get_stacks(self) -> list[DeckStack]:
         return self.stacks
 
+    def get_stack(self, sid: int) -> Optional[DeckStack]:
+        for stack in self.stacks:
+            if stack.get_id() == sid:
+                return stack
+        return None
+
     # TODO: Order them. Add filters (label, other?)
     def get_cards(self) -> list[DeckCard]:
         return [card for stack in self.stacks for card in stack.get_cards()]
+
+    def get_id(self) -> int:
+        return self.__id
 
 
 class Deck:
@@ -363,6 +390,15 @@ class Deck:
     # TODO: Order them. Add filters (label, other?)
     def get_cards(self) -> list[DeckCard]:
         return [card for board in self.boards for stack in board.get_stacks() for card in stack]
+
+    def get_boards(self) -> list[DeckBoard]:
+        return self.boards
+
+    def get_board(self, bid: int) -> Optional[DeckBoard]:
+        for board in self.boards:
+            if board.get_id() == bid:
+                return board
+        return None
 
 
 # Test basic program functionality
