@@ -74,6 +74,9 @@ class DeckLabel:
     def __str__(self) -> str:
         return f'{self.title} (#{self.color.upper()})'
 
+    def get_title(self) -> str:
+        return self.title
+
 
 class DeckCard:
     def __init__(self, card: dict, labels: dict[DeckLabel], users: dict[DeckUser]):
@@ -108,11 +111,6 @@ class DeckCard:
         # TODO: Figure out whether this is a UUID or PK and in case it's the PK just get the DeckUser from dict
         self.last_editor = card['lastEditor']
 
-    def get_shortened_description(self, max: int) -> str:
-        result = " ".join([line for line in self.description.splitlines()])
-        maxlen = max if max > 0 else len(result)
-        return result[0:min(maxlen, len(result))].strip() + ('...' if maxlen < len(result) else '')
-
     def __str__(self) -> str:
         result = f'CARD "{self.title}":\n'
         result += f'    Description: "{self.get_shortened_description(50)}"\n'
@@ -131,6 +129,35 @@ class DeckCard:
 
         return result
 
+    def get_title(self) -> str:
+        return self.title
+
+    def get_description(self) -> str:
+        return self.description
+
+    def get_shortened_description(self, max: int) -> str:
+        result = " ".join([line for line in self.description.splitlines()])
+        maxlen = max if max > 0 else len(result)
+        return result[0:min(maxlen, len(result))].strip() + ('...' if maxlen < len(result) else '')
+
+    def get_labels(self) -> list[DeckLabel]:
+        return self.labels
+
+    def has_label(self, label: [DeckLabel, str]) -> bool:
+        if isinstance(label, DeckLabel):
+            for item in self.labels:
+                if item is label:
+                    return True
+            return False
+        elif isinstance(label, str):
+            for item in self.labels:
+                if item.get_title() == label:
+                    return True
+            return False
+        else:
+            # TODO: Throw an error
+            return False
+
 
 class DeckStack:
     def __init__(self, stack: dict, labels: dict[DeckLabel], users: dict[DeckUser]):
@@ -138,7 +165,7 @@ class DeckStack:
         self.__id = stack['id']
         self.__tag = stack['ETag']
 
-        self.last_edited_time = stack['lastModified']
+        self.last_edited_time = dt.fromtimestamp(stack['lastModified']).astimezone(tz.utc)
         self.order = stack['order']
         self.title = stack['title']
 
@@ -152,9 +179,20 @@ class DeckStack:
 
         return result
 
+    def get_title(self) -> str:
+        return self.title
+
+    def get_last_modified(self) -> dt:
+        return self.last_edited_time
+
+    # TODO: Order them. Add filters (label, other?)
+    def get_cards(self) -> list[DeckCard]:
+        return self.cards
+
     def get_next_event(self) -> Optional[DeckCard]:
         result = None
         for card in self.cards:
+            # TODO: Fix this obscenity without breaking PEP8, somehow
             if card and card.card_due_time and (not result or (result and result.card_due_time > card.card_due_time)) \
                     and card.card_due_time >= dt.now(tz.utc):
                 result = card
@@ -225,16 +263,6 @@ class DeckBoard:
 
         return result
 
-    def get_next_event(self) -> Optional[DeckCard]:
-        result = None
-        for stack in self.stacks:
-            card = stack.get_next_event()
-            if card and (not result or (result and result.card_due_time > card.card_due_time)) \
-                    and card.card_due_time >= dt.now(tz.utc):
-                result = card
-
-        return result
-
     def can_read(self):
         return self.__permissions['PERMISSION_READ']
 
@@ -249,6 +277,25 @@ class DeckBoard:
 
     def deleted(self):
         return self.deletion_time is not None
+
+    def get_next_event(self) -> Optional[DeckCard]:
+        result = None
+        for stack in self.stacks:
+            card = stack.get_next_event()
+            # TODO: Fix this obscenity without breaking PEP8, somehow
+            if card and (not result or (result and result.card_due_time > card.card_due_time)) \
+                    and card.card_due_time >= dt.now(tz.utc):
+                result = card
+
+        return result
+
+    # TODO: Order them. Add filters (which ones?)
+    def get_stacks(self) -> list[DeckStack]:
+        return self.stacks
+
+    # TODO: Order them. Add filters (label, other?)
+    def get_cards(self) -> list[DeckCard]:
+        return [card for stack in self.stacks for card in stack]
 
 
 class Deck:
@@ -284,6 +331,7 @@ class Deck:
         result = None
         for board in self.boards.values():
             card = board.get_next_event()
+            # TODO: Fix this obscenity without breaking PEP8, somehow
             if card and (not result or (result and result.card_due_time > card.card_due_time)) \
                     and card.card_due_time >= dt.now(tz.utc):
                 result = card
@@ -301,6 +349,10 @@ class Deck:
 
     def get_next_event(self) -> Optional[DeckCard]:
         return self.next_event
+
+    # TODO: Order them. Add filters (label, other?)
+    def get_cards(self) -> list[DeckCard]:
+        return [card for board in self.boards for stack in board.get_stacks() for card in stack]
 
 
 # Test basic program functionality
