@@ -5,7 +5,7 @@ import logging
 
 from typing import Optional
 from requests.auth import HTTPBasicAuth
-from datetime import datetime as dt
+from datetime import datetime as dt, timezone as tz
 
 
 class DeckUser:
@@ -69,7 +69,7 @@ class DeckLabel:
 
         self.title = label['title']
         self.color = label['color']
-        self.last_edited_date = dt.fromtimestamp(label['lastModified'])
+        self.last_edited_date = dt.fromtimestamp(label['lastModified']).astimezone(tz.utc)
 
     def __str__(self) -> str:
         return f'{self.title} (#{self.color.upper()})'
@@ -92,10 +92,13 @@ class DeckCard:
         self.overdue = card['overdue']
 
         # Timestamps
-        self.creation_time = dt.fromtimestamp(card['createdAt'])
-        self.last_edited_time = dt.fromtimestamp(card['lastModified'])
-        self.deletion_time = dt.fromtimestamp(card['deletedAt'])
-        self.card_due_time = None if card['duedate'] is None else dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z')
+        self.creation_time = dt.fromtimestamp(card['createdAt']).astimezone(tz.utc)
+        self.last_edited_time = dt.fromtimestamp(card['lastModified']).astimezone(tz.utc)
+        self.deletion_time = dt.fromtimestamp(card['deletedAt']).astimezone(tz.utc)
+
+        # TODO: Fix this obscenity without breaking PEP8, somehow
+        self.card_due_time = None if card['duedate'] is None else \
+            dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z').astimezone(tz.utc)
 
         # Users
         self.assignees = [users[assignee['participant']['primaryKey']] for assignee in card['assignedUsers']]
@@ -152,7 +155,8 @@ class DeckStack:
     def get_next_event(self) -> Optional[DeckCard]:
         result = None
         for card in self.cards:
-            if card and card.card_due_time and (not result or (result and result.card_due_time > card.card_due_time)):
+            if card and card.card_due_time and (not result or (result and result.card_due_time > card.card_due_time)) \
+                    and card.card_due_time >= dt.now(tz.utc):
                 result = card
 
         return result
@@ -182,8 +186,12 @@ class DeckBoard:
         self.shared = board['shared']  # Board shared to the current user (not owned by current user)
 
         # Timestamps for deletion and last edit. Deletion timestamp is 0 if the board has not been deleted
-        self.deletion_time = None if board['deletedAt'] == 0 else dt.fromtimestamp(board['deletedAt'])
-        self.last_edited_time = None if board['lastModified'] == 0 else dt.fromtimestamp(board['lastModified'])
+
+        # TODO: Fix this obscenity without breaking PEP8, somehow
+        self.deletion_time = None if board['deletedAt'] == 0 else \
+            dt.fromtimestamp(board['deletedAt']).astimezone(tz.utc)
+        self.last_edited_time = None if board['lastModified'] == 0 else \
+            dt.fromtimestamp(board['lastModified']).astimezone(tz.utc)
 
         self.stacks = [DeckStack(stack, self.labels, self.users) for stack in stacks]  # Non-empty stacks of the board
 
@@ -221,7 +229,8 @@ class DeckBoard:
         result = None
         for stack in self.stacks:
             card = stack.get_next_event()
-            if card and (not result or (result and result.card_due_time > card.card_due_time)):
+            if card and (not result or (result and result.card_due_time > card.card_due_time)) \
+                    and card.card_due_time >= dt.now(tz.utc):
                 result = card
 
         return result
@@ -280,7 +289,7 @@ class Deck:
 
         boards = d.decode(self.__api_request('boards?details=1'))
         self.boards = {b['ETag']: DeckBoard(b, d.decode(self.__api_request(f'boards/{b["id"]}/stacks')))
-                       for b in boards if b['deletedAt'] == 0 and b['title'] != 'Personal'}
+                       for b in boards if b['deletedAt'] == 0} # and b['title'] != 'Personal'}
 
         self.next_event = self.get_next_event()
 
@@ -288,7 +297,8 @@ class Deck:
         result = None
         for board in self.boards.values():
             card = board.get_next_event()
-            if card and (not result or (result and result.card_due_time > card.card_due_time)):
+            if card and (not result or (result and result.card_due_time > card.card_due_time)) \
+                    and card.card_due_time >= dt.now(tz.utc):
                 result = card
 
         return result
