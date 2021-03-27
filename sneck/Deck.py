@@ -137,86 +137,112 @@ class DeckCard:
         self.__id = card['id']
         self.__tag = card['ETag']
 
-        self.title = card['title']
-        self.description = card['description'].strip()
-        self.labels = [labels[label['ETag']] for label in card['labels']]
-        self.type = card['type']
-        self.archived = card['archived']
+        # TODO: Document possible values and meaning, use it in a meaningful way?
+        self.__type = card['type']
+
+        self.__title = card['title']
+        self.__description = card['description'].strip()
+        self.__labels = [labels[label['ETag']] for label in card['labels']]
+        self.__archived = card['archived']
 
         attachment_count = card['attachmentCount']
         if attachment_count > 0:
             attachments = api.request(f'boards/{bid}/stacks/{sid}/cards/{self.__id}/attachments')
-            self.attachments = [DeckAttachment(attachment) for attachment in attachments]
+            self.__attachments = [DeckAttachment(attachment) for attachment in attachments]
         else:
-            self.attachments = []
+            self.__attachments = []
 
         # Timestamps
-        self.creation_time = dt.fromtimestamp(card['createdAt']).astimezone(tz.utc)
-        self.last_edited_time = dt.fromtimestamp(card['lastModified']).astimezone(tz.utc)
-        self.deletion_time = dt.fromtimestamp(card['deletedAt']).astimezone(tz.utc)
+        self.__creation_time = dt.fromtimestamp(card['createdAt']).astimezone(tz.utc)
+        self.__last_edited_time = dt.fromtimestamp(card['lastModified']).astimezone(tz.utc)
+        self.__deletion_time = dt.fromtimestamp(card['deletedAt']).astimezone(tz.utc)
 
         # TODO: Fix this obscenity without breaking PEP8, somehow
-        self.card_due_time = None if card['duedate'] is None else \
+        self.__card_due_time = None if card['duedate'] is None else \
             dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z').astimezone(tz.utc)
 
         # Users
-        self.assignees = [users[assignee['participant']['primaryKey']] for assignee in card['assignedUsers']]
-        self.creator = users[card['owner']['primaryKey']]
+        self.__assigned_users = [users[assignee['participant']['primaryKey']] for assignee in card['assignedUsers']]
+        self.__owner = users[card['owner']['primaryKey']]
 
         # NOTE: This is just the UUID/PK of the user not the entire structure
         # TODO: Figure out whether this is a UUID or PK and in case it's the PK just get the DeckUser from dict
-        self.last_editor = card['lastEditor']
+        self.__last_editor = card['lastEditor']
 
     def __str__(self) -> str:
-        result = f'CARD "{self.title}":\n'
+        result = f'CARD "{self.__title}":\n'
         result += f'    Description: "{self.get_shortened_description(50)}"\n'
-        result += f'    Labels: {", ".join(label.title for label in self.labels)}\n'
-        result += f'    Attachments: {"None" if len(self.attachments) == 0 else len(self.attachments)}\n'
-        result += f'    Archived: {"Yes" if self.archived else "No"}\n'
-        result += f'    Due date: {self.card_due_time}\n'
-        result += f'    Creator: {self.creator}\n'
+        result += f'    Labels: {", ".join(label.__title for label in self.__labels)}\n'
+        result += f'    Attachments: {"None" if len(self.__attachments) == 0 else len(self.__attachments)}\n'
+        result += f'    Archived: {"Yes" if self.__archived else "No"}\n'
+        result += f'    Due date: {self.__card_due_time}\n'
+        result += f'    Creator: {self.__owner}\n'
 
-        if self.last_editor is not None:
-            result += f'    Last edit at {self.last_edited_time} by {self.last_editor}\n'
+        if self.__last_editor is not None:
+            result += f'    Last edit at {self.__last_edited_time} by {self.__last_editor}\n'
 
-        if len(self.assignees) > 0:
+        if len(self.__assigned_users) > 0:
             result += '    ASSIGNEES:\n        '
-            result += '\n        '.join([str(assignee) for assignee in self.assignees])
+            result += '\n        '.join([str(assignee) for assignee in self.__assigned_users])
 
-        if len(self.attachments) > 0:
+        if len(self.__attachments) > 0:
             result += '    ATTACHMENTS:\n        '
-            result += '\n        '.join([str(attachment) for attachment in self.attachments])
+            result += '\n        '.join([str(attachment) for attachment in self.__attachments])
 
         return result
 
     def get_title(self) -> str:
-        return self.title
+        return self.__title
 
     def get_description(self) -> str:
-        return self.description
+        return self.__description
 
-    def get_shortened_description(self, max: int) -> str:
-        result = " ".join([line for line in self.description.splitlines()])
-        maxlen = max if max > 0 else len(result)
-        return result[0:min(maxlen, len(result))].strip() + ('...' if maxlen < len(result) else '')
+    def get_shortened_description(self, length: int) -> str:
+        result = " ".join([line for line in self.__description.splitlines()])
+        length = length if length > 0 else len(result)
+        return result[0:min(length, len(result))].strip() + ('...' if length < len(result) else '')
 
     def get_labels(self) -> list[DeckLabel]:
-        return self.labels
+        return self.__labels
+
+    def get_creation_time(self) -> dt:
+        return self.__creation_time
+
+    def get_last_modified_time(self) -> dt:
+        return self.__last_edited_time
+
+    def get_last_modified_user(self) -> dt:
+        return self.__last_editor
+
+    def get_deletion_time(self) -> Optional[dt]:
+        return self.__deletion_time
+
+    def get_due_time(self) -> Optional[dt]:
+        return self.__card_due_time
+
+    def get_owner(self) -> DeckUser:
+        return self.__owner
+
+    def get_assigned_users(self) -> list[DeckUser]:
+        return self.__assigned_users
 
     def has_label(self, label: [DeckLabel, str]) -> bool:
         if isinstance(label, DeckLabel):
-            for item in self.labels:
+            for item in self.__labels:
                 if item is label:
                     return True
             return False
         elif isinstance(label, str):
-            for item in self.labels:
+            for item in self.__labels:
                 if item.get_title() == label:
                     return True
             return False
         else:
             # TODO: Throw an error
             return False
+
+    def is_archived(self) -> bool:
+        return self.__archived
 
     def get_id(self) -> int:
         return self.__id
@@ -228,10 +254,10 @@ class DeckStack:
         self.__board_id = bid
         self.__id = stack['id']
         self.__tag = stack['ETag']
+        self.__order = stack['order']
 
-        self.last_edited_time = dt.fromtimestamp(stack['lastModified']).astimezone(tz.utc)
-        self.order = stack['order']
-        self.title = stack['title']
+        self.__last_edited_time = dt.fromtimestamp(stack['lastModified']).astimezone(tz.utc)
+        self.__title = stack['title']
 
         if 'cards' in stack:
             self.cards = [DeckCard(card, bid, stack['id'], labels, users, api) for card in stack['cards']]
@@ -239,22 +265,28 @@ class DeckStack:
             self.cards = []
 
     def __str__(self) -> str:
-        result = f'STACK "{self.title}"\n'
+        result = f'STACK "{self.__title}"\n'
 
         for card in self.cards:
             result += ('\n'.join(['    ' + line for line in str(card).splitlines()])) + '\n'
 
         return result
 
+    def __repr__(self) -> str:
+        return self.__tag
+
     def get_title(self) -> str:
-        return self.title
+        return self.__title
 
     def get_last_modified(self) -> dt:
-        return self.last_edited_time
+        return self.__last_edited_time
 
     # TODO: Order them. Add filters (label, other?)
     def get_cards(self) -> list[DeckCard]:
         return self.cards
+
+    def get_events(self) -> list[DeckCard]:
+        return [card for card in self.cards if card.__card_due_time and card.__card_due_time >= dt.now(tz.utc)]
 
     def get_card(self, cid: int) -> Optional[DeckCard]:
         for card in self.cards:
@@ -266,8 +298,8 @@ class DeckStack:
         result = None
         for card in self.cards:
             # TODO: Fix this obscenity without breaking PEP8, somehow
-            if card and card.card_due_time and (not result or (result and result.card_due_time > card.card_due_time)) \
-                    and card.card_due_time >= dt.now(tz.utc):
+            if card and card.__card_due_time and (not result or (result and result.card_due_time > card.__card_due_time)) \
+                    and card.__card_due_time >= dt.now(tz.utc):
                 result = card
 
         return result
@@ -407,6 +439,9 @@ class DeckBoard:
     def get_last_modification_time(self) -> dt:
         return self.__last_edited_time
 
+    def get_id(self) -> int:
+        return self.__id
+
     # TODO: Order them. Add filters (which ones?)
     def get_stacks(self) -> list[DeckStack]:
         return self.__stacks
@@ -422,21 +457,18 @@ class DeckBoard:
         return [card for stack in self.__stacks for card in stack.get_cards()]
 
     def get_events(self) -> list[DeckCard]:
-        return [card for card in self.get_cards() if card.card_due_time and card.card_due_time >= dt.now(tz.utc)]
+        return [card for card in self.get_cards() if card.__card_due_time and card.__card_due_time >= dt.now(tz.utc)]
 
     def get_next_event(self) -> Optional[DeckCard]:
         result = None
         for stack in self.__stacks:
             card = stack.get_next_event()
             # TODO: Fix this obscenity without breaking PEP8, somehow
-            if card and (not result or (result and result.card_due_time > card.card_due_time)) \
-                    and card.card_due_time >= dt.now(tz.utc):
+            if card and (not result or (result and result.__card_due_time > card.__card_due_time)) \
+                    and card.__card_due_time >= dt.now(tz.utc):
                 result = card
 
         return result
-
-    def get_id(self) -> int:
-        return self.__id
 
 
 class Deck:
@@ -459,8 +491,8 @@ class Deck:
         for board in self.boards.values():
             card = board.get_next_event()
             # TODO: Fix this obscenity without breaking PEP8, somehow
-            if card and (not result or (result and result.card_due_time > card.card_due_time)) \
-                    and card.card_due_time >= dt.now(tz.utc):
+            if card and (not result or (result and result.card_due_time > card.__card_due_time)) \
+                    and card.__card_due_time >= dt.now(tz.utc):
                 result = card
 
         return result
