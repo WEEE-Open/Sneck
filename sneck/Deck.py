@@ -22,13 +22,14 @@ class DeckAPI:
             response = requests.get(self.__api_base + binding,
                                     headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
                                     auth=HTTPBasicAuth(self.__username, self.__password))
-        except ConnectionError as error:
+            print(response.text)
+        except ConnectionError:
             raise APIError(APIError.Reason.CONNECTION, 0, 'Connection error.')
-        except HTTPError as error:
+        except HTTPError:
             raise APIError(APIError.Reason.RESPONSE, 0, 'Invalid HTTP response')
-        except Timeout as error:
+        except Timeout:
             raise APIError(APIError.Reason.TIMEOUT, 0, 'Timeout during connection')
-        except TooManyRedirects as error:
+        except TooManyRedirects:
             APIError(APIError.Reason.RESPONSE, 0, 'Too many redirects')
             return None
 
@@ -45,7 +46,6 @@ class DeckUser:
         self.__pkey = data['primaryKey']
         self.__uuid = data['uid']
         self.__type = data['type']
-
         self.__name = data['displayname']
 
     def __str__(self) -> str:
@@ -59,14 +59,14 @@ class DeckUser:
 
 
 class DeckAcl:
-    def __init__(self, data: dict, users: dict, bid: int):
+    def __init__(self, acl: dict, users: dict):
         # Internal identifier and type of the ACL
-        self.__id = data['id']
-        self.__board_id = bid
-        self.__type = data['type']
-        self.__permissions = {'edit': data['permissionEdit'],
-                              'share': data['permissionShare'],
-                              'manage': data['permissionManage']}
+        self.__id = acl['id']
+        self.__board_id = acl['boardId']
+        self.__type = acl['type']
+        self.__permissions = {'edit': acl['permissionEdit'],
+                              'share': acl['permissionShare'],
+                              'manage': acl['permissionManage']}
 
         # ACLs are different wrt to user management than cards or every other object that contains DeckUsers
         # While the list of users obtained with the "/boards?details=1" API call contains all effective users
@@ -74,12 +74,12 @@ class DeckAcl:
         # groups. Groups get unrolled within the previous API call into the single participants, therefore ACL
         # principals are not guaranteed to be in the DeckBoard.users dictionary. We remedy this by adding those
         # principals to that dictionary in the event they are not found at ACL creation time.
-        if data['participant']['primaryKey'] not in users:
-            users[data['participant']['primaryKey']] = DeckUser(data['participant'])
-        self.__principal = users[data['participant']['primaryKey']]
+        if acl['participant']['primaryKey'] not in users:
+            users[acl['participant']['primaryKey']] = DeckUser(acl['participant'])
+        self.__principal = users[acl['participant']['primaryKey']]
 
         # If the user is the owner of the entity
-        self.__owner = data['owner']
+        self.__owner = acl['owner']
 
     def __str__(self) -> str:
         return str(self.__principal) + f' [{",".join(k for k, v in self.__permissions.items() if v == True)}]'
@@ -104,9 +104,9 @@ class DeckAcl:
 
 
 class DeckLabel:
-    def __init__(self, label: dict, bid: int):
+    def __init__(self, label: dict):
         # Internal identifiers for the label
-        self.__board_id = bid
+        self.__board_id = label['boardId']
         self.__id = label['id']
         self.__tag = label['ETag']
 
@@ -134,9 +134,9 @@ class DeckLabel:
 
 
 class DeckAttachment:
-    def __init__(self, attachment: dict, cid: int, sid: int, bid: int):
+    def __init__(self, attachment: dict, sid: int, bid: int):
         self.__id = attachment['id']
-        self.__card_id = cid
+        self.__card_id = attachment['cardId']
         self.__stack_id = sid
         self.__board_id = bid
         self.__type = attachment['type']
@@ -203,11 +203,13 @@ class DeckAttachment:
         return self.__deletion_time
 
 
+# TODO: Fix labels
+# TODO: Add attachments accessors and commentsUnread accessors
 class DeckCard:
-    def __init__(self, card: dict, bid: int, sid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI):
+    def __init__(self, card: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI):
         # Internal identifiers for the card
         self.__board_id = bid
-        self.__stack_id = sid
+        self.__stack_id = card['stackId']
         self.__id = card['id']
         self.__tag = card['ETag']
 
@@ -219,16 +221,16 @@ class DeckCard:
         self.__labels = [labels[label['ETag']] for label in card['labels']]
         self.__archived = card['archived']
 
-        self.__attachments = ([DeckAttachment(attachment, self.__board_id, self.__stack_id, self.__id) for attachment in
-                              api.request(f'boards/{bid}/stacks/{sid}/cards/{self.__id}/attachments')]
+        self.__attachments = ([DeckAttachment(attachment, self.__stack_id, self.__board_id) for attachment in
+                              api.request(f'boards/{bid}/stacks/{self.__stack_id}/cards/{self.__id}/attachments')]
                               if card['attachmentCount'] > 0 else [])
+
+        self.__unread_comments = card['commentsUnread']
 
         # Timestamps
         self.__creation_time = dt.fromtimestamp(card['createdAt']).astimezone(tz.utc)
         self.__last_edited_time = dt.fromtimestamp(card['lastModified']).astimezone(tz.utc)
         self.__deletion_time = dt.fromtimestamp(card['deletedAt']).astimezone(tz.utc)
-
-        # TODO: Fix this obscenity without breaking PEP8, somehow
         self.__card_due_time = (None if card['duedate'] is None else
                                 dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z').astimezone(tz.utc))
 
@@ -252,13 +254,17 @@ class DeckCard:
         if self.__last_editor is not None:
             result += f'    Last edit at {self.__last_edited_time} by {self.__last_editor}\n'
 
-        if len(self.__assigned_users) > 0:
-            result += '    ASSIGNEES:\n        '
-            result += '\n        '.join([str(assignee) for assignee in self.__assigned_users])
+        result += (' '*4 + 'LABELS:\n' + ' '*8 +
+                   '\n        '.join([e for i in self.__labels for e in str(i).splitlines()]) +
+                   '\n' if len(self.__labels) > 0 else '')
 
-        if len(self.__attachments) > 0:
-            result += '    ATTACHMENTS:\n        '
-            result += '\n        '.join([str(attachment) for attachment in self.__attachments])
+        result += (' '*4 + 'ASSIGNED USERS:\n' + ' '*8 +
+                   '\n        '.join([e for i in self.__assigned_users for e in str(i).splitlines()]) +
+                   '\n' if len(self.__assigned_users) > 0 else '')
+
+        result += (' '*4 + 'ATTACHMENTS:\n' + ' '*8 +
+                   '\n        '.join([e for i in self.__attachments for e in str(i).splitlines()]) +
+                   '\n' if len(self.__attachments) > 0 else '')
 
         return result
 
@@ -324,17 +330,18 @@ class DeckCard:
 
 
 class DeckStack:
-    def __init__(self, stack: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI):
+    def __init__(self, stack: dict, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI):
         # Internal identifiers for the board
-        self.__board_id = bid
+        self.__board_id = stack['boardId']
         self.__id = stack['id']
         self.__tag = stack['ETag']
         self.__order = stack['order']
 
         self.__last_edited_time = dt.fromtimestamp(stack['lastModified']).astimezone(tz.utc)
-        self.__title = stack['title']
+        self.__deletion_time = dt.fromtimestamp(stack['deletedAt']).astimezone(tz.utc)
 
-        self.__cards = ([DeckCard(card, bid, stack['id'], labels, users, api) for card in stack['cards']]
+        self.__title = stack['title']
+        self.__cards = ([DeckCard(card, self.__board_id, labels, users, api) for card in stack['cards']]
                         if 'cards' in stack else [])
 
     def __str__(self) -> str:
@@ -384,12 +391,12 @@ class DeckBoard:
 
         self.__title = board['title']
         self.__color = board['color']
-        self.__labels = {label['ETag']: DeckLabel(label, self.__id) for label in board['labels']}
+        self.__labels = {label['ETag']: DeckLabel(label) for label in board['labels']}
 
         # Users and access control
         self.__users = {user['primaryKey']: DeckUser(user) for user in board['users']}
         self.__owner = self.__users[board['owner']['primaryKey']]
-        self.__acl = [DeckAcl(acl, self.__users, self.__id) for acl in board['acl']]
+        self.__acl = [DeckAcl(acl, self.__users) for acl in board['acl']]
 
         self.__archived = board['archived']  # Board archived by current user
         self.__shared = board['shared']  # Board shared to the current user (not owned by current user)
@@ -401,7 +408,7 @@ class DeckBoard:
         self.__last_edited_time = (None if board['lastModified'] == 0
                                    else dt.fromtimestamp(board['lastModified']).astimezone(tz.utc))
 
-        self.__stacks = [DeckStack(stack, board['id'], self.__labels, self.__users, api)
+        self.__stacks = [DeckStack(stack, self.__labels, self.__users, api)
                          for stack in api.request(f'boards/{self.__id}/stacks')]
 
     def __str__(self):
