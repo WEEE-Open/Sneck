@@ -33,7 +33,7 @@ class DeckAPI:
             return None
 
         # Check if the status code is an error or if the return type is not json data in case we screw up
-        if not response.ok or response.headers['Content-Type'] != 'application/json':
+        if not response.ok or 'application/json' not in response.headers['Content-Type']:
             raise APIError(APIError.Reason.RESPONSE, response.status_code, f'Server error while processing response')
 
         return response.json()
@@ -49,10 +49,10 @@ class DeckUser:
         self.__name = data['displayname']
 
     def __str__(self) -> str:
-        return f'{self.__name} (PK={self.__pkey}, UUID={self.__uuid})'
+        return self.__name
 
     def __repr__(self) -> str:
-        return self.__pkey
+        return f'User "{self.__name}" (PK={self.__pkey}, UID={self.__uuid}, Type={self.__type})'
 
     def get_name(self) -> str:
         return self.__name
@@ -243,7 +243,7 @@ class DeckCard:
     def __str__(self) -> str:
         result = f'CARD "{self.__title}":\n'
         result += f'    Description: "{self.get_shortened_description(50)}"\n'
-        result += f'    Labels: {", ".join(label.__title for label in self.__labels)}\n'
+        result += f'    Labels: {", ".join(label.get_title() for label in self.__labels)}\n'
         result += f'    Attachments: {"None" if len(self.__attachments) == 0 else len(self.__attachments)}\n'
         result += f'    Archived: {"Yes" if self.__archived else "No"}\n'
         result += f'    Due date: {self.__card_due_time}\n'
@@ -338,8 +338,8 @@ class DeckStack:
                         if 'cards' in stack else [])
 
     def __str__(self) -> str:
-        cards = "    \n".join([line for card in self.__cards for line in str(card).splitlines()])
-        return f'STACK "{self.__title}"\n    {cards}\n'
+        cards = "\n    ".join([line for card in self.__cards for line in str(card).splitlines()])
+        return f'STACK "{self.__title}"\n    {cards}'
 
     def __repr__(self) -> str:
         return self.__tag
@@ -417,21 +417,21 @@ class DeckBoard:
         result += f'    Owner: {self.__owner}\n'
         result += f'    Last modification at {self.__last_edited_time}\n'
 
-        result += (' '*4 + 'LABELS:\n' +
-                   ' '*8 + '\n'.join([e for i in [k for k, v in self.__labels.items()] for e in str(i).splitlines()]) +
+        result += (' '*4 + 'LABELS:\n' + ' '*8 +
+                   '\n        '.join([e for i in [k for k, v in self.__labels.items()] for e in str(i).splitlines()]) +
                    '\n' if len(self.__labels) > 0 else '')
 
-        result += (' '*4 + 'USERS:\n' +
-                   ' '*8 + '\n'.join([e for i in [k for k, v in self.__users.items()] for e in str(i).splitlines()]) +
+        result += (' '*4 + 'USERS:\n' + ' '*8 +
+                   '\n        '.join([e for i in [k for k, v in self.__users.items()] for e in str(i).splitlines()]) +
                    '\n' if len(self.__users) > 0 else '')
 
-        result += (' '*4 + 'ACL:\n' +
-                   ' '*8 + '\n'.join([e for i in self.__acl for e in str(i).splitlines()]) +
+        result += (' '*4 + 'ACL:\n' + ' '*8 +
+                   '\n        '.join([e for i in self.__acl for e in str(i).splitlines()]) +
                    '\n' if len(self.__users) > 0 else '')
 
-        result += (' '*4 + 'STACKS:\n' +
-                   ' '*8 + '\n'.join([e for i in self.__stacks for e in str(i).splitlines()]) +
-                   '\n' if len(self.__users) > 0 else '')
+        result += (' '*4 + 'STACKS:\n' + ' '*8 +
+                   '\n        '.join([e for i in self.__stacks for e in str(i).splitlines()])
+                   if len(self.__users) > 0 else '')
 
         return result
 
@@ -538,7 +538,7 @@ class Deck:
         boards = self.__api.request('boards?details=1')
 
         self.__boards = {b['ETag']: DeckBoard(b, self.__api) for b in boards if b['deletedAt'] == 0}
-        self.__events = sorted([e for events in [b.get_events(past=True) for b in self.__boards] for e in events],
+        self.__events = sorted([e for ls in [v.get_events(past=True) for k, v in self.__boards.items()] for e in ls],
                                key=lambda x: x.get_due_time())
 
     def update(self):
