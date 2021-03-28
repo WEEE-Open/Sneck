@@ -203,8 +203,6 @@ class DeckAttachment:
         return self.__deletion_time
 
 
-# TODO: Fix labels
-# TODO: Add attachments accessors and commentsUnread accessors
 class DeckCard:
     def __init__(self, card: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI):
         # Internal identifiers for the card
@@ -305,6 +303,13 @@ class DeckCard:
 
     def get_assigned_users(self) -> list[DeckUser]:
         return self.__assigned_users
+
+    def get_attachments(self) -> list[DeckAttachment]:
+        return self.__attachments
+
+    def get_attachment(self, path: str) -> Optional[DeckAttachment]:
+        result = [attachment for attachment in self.get_attachments() if attachment.get_full_name() == path]
+        return result[0] if len(result) == 1 else None
 
     def is_assigned(self, user: Union[DeckUser, str]):
         if isinstance(user, DeckUser):
