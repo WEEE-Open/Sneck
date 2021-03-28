@@ -57,16 +57,24 @@ class DeckUser:
     def get_name(self) -> str:
         return self.__name
 
+    def get_primary_key(self) -> str:
+        return self.__pkey
+
+    def get_id(self) -> str:
+        return self.__uuid
+
 
 class DeckAcl:
     def __init__(self, acl: dict, users: dict):
         # Internal identifier and type of the ACL
         self.__id = acl['id']
         self.__board_id = acl['boardId']
-        self.__type = acl['type']
         self.__permissions = {'edit': acl['permissionEdit'],
                               'share': acl['permissionShare'],
                               'manage': acl['permissionManage']}
+
+        # TODO: Figure out what is this and properly expose it
+        self.__type = acl['type']
 
         # ACLs are different wrt to user management than cards or every other object that contains DeckUsers
         # While the list of users obtained with the "/boards?details=1" API call contains all effective users
@@ -102,6 +110,9 @@ class DeckAcl:
     def is_owner(self) -> bool:
         return self.__owner
 
+    def get_id(self) -> int:
+        return self.__id
+
 
 class DeckLabel:
     def __init__(self, label: dict):
@@ -132,6 +143,9 @@ class DeckLabel:
     def get_last_modification_time(self) -> dt:
         return self.__last_edited_date
 
+    def get_id(self) -> int:
+        return self.__id
+
 
 class DeckAttachment:
     def __init__(self, attachment: dict, sid: int, bid: int):
@@ -139,9 +153,9 @@ class DeckAttachment:
         self.__card_id = attachment['cardId']
         self.__stack_id = sid
         self.__board_id = bid
-        self.__type = attachment['type']
 
-        # Not sure about what this is? We'll store it but keep it private and not expose it for now...
+        # TODO: Document possible values and expose properly
+        self.__type = attachment['type']
         self.__data = attachment['data']
 
         self.__size = attachment['extendedData']['filesize']
@@ -155,19 +169,14 @@ class DeckAttachment:
 
         self.__creation_time = dt.fromtimestamp(attachment['createdAt']).astimezone(tz.utc)
         self.__last_edit_time = dt.fromtimestamp(attachment['lastModified']).astimezone(tz.utc)
-        self.__deletion_time = dt.fromtimestamp(attachment['deletedAt']).astimezone(tz.utc)
+        self.__deletion_time = (dt.fromtimestamp(attachment['deletedAt']).astimezone(tz.utc)
+                                if attachment['deletedAt'] != 0 else None)
 
     def __str__(self) -> str:
         return f'ATTACHMENT {self.__name["name"] + "." + self.__name["ext"]} ({self.__size} byte)'
 
     def __repr__(self) -> str:
         return '.'.join([self.__board_id, self.__stack_id, self.__card_id, self.__id])
-
-    def get_id(self) -> int:
-        return self.__id
-
-    def get_type(self) -> str:
-        return self.__type
 
     def get_size(self) -> int:
         return self.__size
@@ -199,8 +208,11 @@ class DeckAttachment:
     def get_last_modification_time(self) -> dt:
         return self.__last_edit_time
 
-    def get_deletion_time(self) -> dt:
+    def get_deletion_time(self) -> Optional[dt]:
         return self.__deletion_time
+
+    def get_id(self) -> int:
+        return self.__id
 
 
 class DeckCard:
@@ -213,6 +225,8 @@ class DeckCard:
 
         # TODO: Document possible values and meaning, use it in a meaningful way?
         self.__type = card['type']
+
+        self.__order = card['order']
 
         self.__title = card['title']
         self.__description = card['description'].strip()
@@ -228,7 +242,9 @@ class DeckCard:
         # Timestamps
         self.__creation_time = dt.fromtimestamp(card['createdAt']).astimezone(tz.utc)
         self.__last_edited_time = dt.fromtimestamp(card['lastModified']).astimezone(tz.utc)
-        self.__deletion_time = dt.fromtimestamp(card['deletedAt']).astimezone(tz.utc)
+        self.__deletion_time = (dt.fromtimestamp(card['deletedAt']).astimezone(tz.utc)
+                                if card['deletedAt'] != 0 else None)
+
         self.__card_due_time = (None if card['duedate'] is None else
                                 dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z').astimezone(tz.utc))
 
@@ -283,6 +299,9 @@ class DeckCard:
     def get_labels(self) -> list[DeckLabel]:
         return self.__labels
 
+    def get_order(self) -> int:
+        return self.__order
+
     def get_creation_time(self) -> dt:
         return self.__creation_time
 
@@ -310,6 +329,9 @@ class DeckCard:
     def get_attachment(self, path: str) -> Optional[DeckAttachment]:
         result = [attachment for attachment in self.get_attachments() if attachment.get_full_name() == path]
         return result[0] if len(result) == 1 else None
+
+    def get_unread_comments(self) -> int:
+        return self.__unread_comments
 
     def is_assigned(self, user: Union[DeckUser, str]):
         if isinstance(user, DeckUser):
@@ -343,7 +365,8 @@ class DeckStack:
         self.__order = stack['order']
 
         self.__last_edited_time = dt.fromtimestamp(stack['lastModified']).astimezone(tz.utc)
-        self.__deletion_time = dt.fromtimestamp(stack['deletedAt']).astimezone(tz.utc)
+        self.__deletion_time = (dt.fromtimestamp(stack['deletedAt']).astimezone(tz.utc)
+                                if stack['deletedAt'] != 0 else None)
 
         self.__title = stack['title']
         self.__cards = ([DeckCard(card, self.__board_id, labels, users, api) for card in stack['cards']]
@@ -359,8 +382,14 @@ class DeckStack:
     def get_title(self) -> str:
         return self.__title
 
-    def get_last_modified(self) -> dt:
+    def get_last_modification_time(self) -> dt:
         return self.__last_edited_time
+
+    def get_deletion_time(self) -> Optional[dt]:
+        return self.__deletion_time
+
+    def get_order(self) -> int:
+        return self.__order
 
     # TODO: Order them. Add filters (label, other?)
     def get_cards(self) -> list[DeckCard]:
@@ -407,8 +436,8 @@ class DeckBoard:
         self.__shared = board['shared']  # Board shared to the current user (not owned by current user)
 
         # Timestamps for deletion and last edit. Deletion timestamp is 0 if the board has not been deleted
-        self.__deletion_time = (None if board['deletedAt'] == 0
-                                else dt.fromtimestamp(board['deletedAt']).astimezone(tz.utc))
+        self.__deletion_time = (dt.fromtimestamp(board['deletedAt']).astimezone(tz.utc)
+                                if board['deletedAt'] != 0 else None)
 
         self.__last_edited_time = (None if board['lastModified'] == 0
                                    else dt.fromtimestamp(board['lastModified']).astimezone(tz.utc))
@@ -499,9 +528,6 @@ class DeckBoard:
     def get_last_modification_time(self) -> dt:
         return self.__last_edited_time
 
-    def get_id(self) -> int:
-        return self.__id
-
     # TODO: Order them. Add filters (which ones?)
     def get_stacks(self) -> list[DeckStack]:
         return self.__stacks
@@ -526,6 +552,9 @@ class DeckBoard:
     def get_next_event(self) -> Optional[DeckCard]:
         result = self.get_events()
         return result[0] if len(result) > 0 else None
+
+    def get_id(self) -> int:
+        return self.__id
 
 
 class Deck:
