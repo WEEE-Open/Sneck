@@ -47,6 +47,7 @@ class DeckUser:
     def __repr__(self) -> str:
         return self.__pkey
 
+
 class DeckAcl:
     def __init__(self, data: dict, users: dict):
         # Internal identifier and type of the ACL
@@ -432,7 +433,7 @@ class DeckBoard:
             return self.__permissions['PERMISSION_READ']
         else:
             for acl in self.__acl:
-                if repr(acl.__principal) == pk:
+                if repr(acl.get_principal()) == pk:
                     return True
             return False
 
@@ -441,7 +442,7 @@ class DeckBoard:
             return self.__permissions['PERMISSION_EDIT']
         else:
             for acl in self.__acl:
-                if repr(acl.__principal) == pk:
+                if repr(acl.get_principal()) == pk:
                     return acl.can_edit()
             return False
 
@@ -450,7 +451,7 @@ class DeckBoard:
             return self.__permissions['PERMISSION_MANAGE']
         else:
             for acl in self.__acl:
-                if repr(acl.__principal) == pk:
+                if repr(acl.get_principal()) == pk:
                     return acl.can_manage()
             return False
 
@@ -459,7 +460,7 @@ class DeckBoard:
             return self.__permissions['PERMISSION_SHARE']
         else:
             for acl in self.__acl:
-                if repr(acl.__principal) == pk:
+                if repr(acl.get_principal()) == pk:
                     return acl.can_share()
             return False
 
@@ -508,7 +509,14 @@ class DeckBoard:
         return [card for stack in self.__stacks for card in stack.get_cards()]
 
     def get_events(self) -> list[DeckCard]:
-        return [card for card in self.get_cards() if card.__card_due_time and card.__card_due_time >= dt.now(tz.utc)]
+        return [card for card in self.get_cards() if card.get_due_time() and card.get_due_time() >= dt.now(tz.utc)]
+
+    def get_card(self, cid: int) -> Optional[DeckCard]:
+        for stack in self.__stacks:
+            card = stack.get_card(cid)
+            if card is not None:
+                return card
+        return None
 
     def get_next_event(self) -> Optional[DeckCard]:
         result = None
@@ -528,18 +536,18 @@ class Deck:
         self.__password = password
         self.__api = DeckAPI(username, password, domain, secure)
 
-        self.next_event = None
-        self.boards = {}
-        self.users = {}
+        self.__next_event = None
+        self.__boards = {}
+        self.__users = {}
 
         self.download()
 
     def __str__(self):
-        return '\n\n'.join([str(board) for board in self.boards.values()])
+        return '\n\n'.join([str(board) for board in self.__boards.values()])
 
     def __search_next_event(self) -> Optional[DeckCard]:
         result = None
-        for board in self.boards.values():
+        for board in self.__boards.values():
             card = board.get_next_event()
             # TODO: Fix this obscenity without breaking PEP8, somehow
             if card and (not result or (result and result.card_due_time > card.__card_due_time)) \
@@ -550,25 +558,42 @@ class Deck:
 
     def download(self):
         boards = self.__api.request('boards?details=1')
-        self.boards = {b['ETag']: DeckBoard(b, self.__api) for b in boards if b['deletedAt'] == 0}
+        self.__boards = {b['ETag']: DeckBoard(b, self.__api) for b in boards if b['deletedAt'] == 0}
 
-        self.next_event = self.__search_next_event()
+        self.__next_event = self.__search_next_event()
+
+    def update(self):
+        # TODO: Try to be smart and only re-download data that actually changed
+        self.download()
 
     def get_next_event(self) -> Optional[DeckCard]:
-        return self.next_event
+        return self.__next_event
 
     # TODO: Order them. Add filters (label, other?)
     def get_cards(self) -> list[DeckCard]:
-        return [card for board in self.boards for stack in board.get_stacks() for card in stack]
+        return [card for board in self.__boards for stack in board.get_stacks() for card in stack]
+
+    def get_card(self, cid: int) -> Optional[DeckCard]:
+        for board in self.get_boards():
+            card = board.get_card(cid)
+            if card is not None:
+                return card
+        return None
 
     def get_boards(self) -> list[DeckBoard]:
-        return self.boards
+        return [v for k, v in self.__boards]
 
     def get_board(self, bid: int) -> Optional[DeckBoard]:
-        for board in self.boards:
+        for board in self.__boards:
             if board.get_id() == bid:
                 return board
         return None
+
+    def get_users(self) -> list[DeckUser]:
+        return [v for k, v in self.__users]
+
+    def get_user(self, pk: str) -> Optional[DeckUser]:
+        return self.__users[pk] if pk in self.__users else None
 
 
 # Test basic program functionality
