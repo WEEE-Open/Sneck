@@ -3,9 +3,11 @@ import os
 import logging
 
 from typing import Optional, Union
-from requests import ConnectionError,HTTPError,Timeout,TooManyRedirects
+from requests import ConnectionError, HTTPError, Timeout, TooManyRedirects
 from requests.auth import HTTPBasicAuth
 from datetime import datetime as dt, timezone as tz
+
+from DeckErrors import DeckAPIRequestError as APIError
 
 
 class DeckAPI:
@@ -21,22 +23,18 @@ class DeckAPI:
                                     headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
                                     auth=HTTPBasicAuth(self.__username, self.__password))
         except ConnectionError as error:
-            logging.error('Failed to complete request: connection error.')
-            return None
+            raise APIError(APIError.Reason.CONNECTION, 0, 'Connection error.')
         except HTTPError as error:
-            logging.error('Failed to complete request: invalid HTTP response')
-            return None
+            raise APIError(APIError.Reason.RESPONSE, 0, 'Invalid HTTP response')
         except Timeout as error:
-            logging.error('Failed to complete request: timeout during connection')
-            return None
+            raise APIError(APIError.Reason.TIMEOUT, 0, 'Timeout during connection')
         except TooManyRedirects as error:
-            logging.error('Failed to complete request: too many redirects')
+            APIError(APIError.Reason.RESPONSE, 0, 'Too many redirects')
             return None
 
         # Check if the status code is an error or if the return type is not json data in case we screw up
         if not response.ok or response.headers['Content-Type'] != 'application/json':
-            logging.error(f'Failed to complete request: HTTP Status {response.status_code}')
-            return None
+            raise APIError(APIError.Reason.RESPONSE, response.status_code,f'Server error while processing response')
 
         return response.json()
 
@@ -575,10 +573,8 @@ class Deck:
         return result
 
     def download(self):
+        # Not handling exception is intentional: let the client handle it according to application
         boards = self.__api.request('boards?details=1')
-        if boards is None:
-            logging.error(f'Unable to download deck data: aborting download.')
-            return
 
         self.__boards = {b['ETag']: DeckBoard(b, self.__api) for b in boards if b['deletedAt'] == 0}
 
@@ -586,6 +582,7 @@ class Deck:
 
     def update(self):
         # TODO: Try to be smart and only re-download data that actually changed
+        # Not handling exception is intentional: let the client handle it according to application
         self.download()
 
     def get_next_event(self) -> Optional[DeckCard]:
