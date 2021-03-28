@@ -1,9 +1,9 @@
 import requests
-import json
 import os
 import logging
 
 from typing import Optional, Union
+from requests import ConnectionError,HTTPError,Timeout,TooManyRedirects
 from requests.auth import HTTPBasicAuth
 from datetime import datetime as dt, timezone as tz
 
@@ -13,22 +13,32 @@ class DeckAPI:
         self.__api_base = f'{"https" if secure else "http"}://{hostname}/index.php/apps/deck/api/v1.0/'
         self.__username = username
         self.__password = password
-        self.__decoder = json.decoder.JSONDecoder()
 
-    def request(self, binding: str) -> Union[list, dict]:
+    def request(self, binding: str) -> Optional[Union[list, dict]]:
         logging.debug(f'Making request {self.__api_base + binding}...')
-        response = requests.get(self.__api_base + binding,
-                                headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
-                                auth=HTTPBasicAuth(self.__username, self.__password))
-
-        # TODO: Actually handle something?
-        if not response.ok:
-            logging.error(f'Request failed [Return code: {response.status_code}]!')
-            logging.error(f'Unable to download deck content from API {self.__api_base + binding}')
-
+        try:
+            response = requests.get(self.__api_base + binding,
+                                    headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
+                                    auth=HTTPBasicAuth(self.__username, self.__password))
+        except ConnectionError as error:
+            logging.error('Failed to complete request: connection error.')
             return None
-        print(response.text)
-        return self.__decoder.decode(response.text)
+        except HTTPError as error:
+            logging.error('Failed to complete request: invalid HTTP response')
+            return None
+        except Timeout as error:
+            logging.error('Failed to complete request: timeout during connection')
+            return None
+        except TooManyRedirects as error:
+            logging.error('Failed to complete request: too many redirects')
+            return None
+
+        # Check if the status code is an error or if the return type is not json data in case we screw up
+        if not response.ok or response.headers['Content-Type'] != 'application/json':
+            logging.error(f'Failed to complete request: HTTP Status {response.status_code}')
+            return None
+
+        return response.json()
 
 
 class DeckUser:
@@ -566,6 +576,10 @@ class Deck:
 
     def download(self):
         boards = self.__api.request('boards?details=1')
+        if boards is None:
+            logging.error(f'Unable to download deck data: aborting download.')
+            return
+
         self.__boards = {b['ETag']: DeckBoard(b, self.__api) for b in boards if b['deletedAt'] == 0}
 
         self.__next_event = self.__search_next_event()
