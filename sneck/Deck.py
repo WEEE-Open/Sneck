@@ -34,7 +34,7 @@ class DeckAPI:
 
         # Check if the status code is an error or if the return type is not json data in case we screw up
         if not response.ok or response.headers['Content-Type'] != 'application/json':
-            raise APIError(APIError.Reason.RESPONSE, response.status_code,f'Server error while processing response')
+            raise APIError(APIError.Reason.RESPONSE, response.status_code, f'Server error while processing response')
 
         return response.json()
 
@@ -75,7 +75,6 @@ class DeckAcl:
         # principals to that dictionary in the event they are not found at ACL creation time.
         if data['participant']['primaryKey'] not in users:
             users[data['participant']['primaryKey']] = DeckUser(data['participant'])
-
         self.__principal = users[data['participant']['primaryKey']]
 
         # If the user is the owner of the entity
@@ -134,7 +133,10 @@ class DeckAttachment:
     def __init__(self, attachment: dict):
         self.__id = attachment['id']
         self.__type = attachment['type']
+
+        # Not sure about what this is? We'll store it but keep it private and not expose it for now...
         self.__data = attachment['data']
+
         self.__size = attachment['extendedData']['filesize']
         self.__mime = attachment['extendedData']['mimetype']
         self.__name = {'dir': attachment['extendedData']['info']['dirname'],
@@ -149,7 +151,7 @@ class DeckAttachment:
         self.__deletion_time = dt.fromtimestamp(attachment['deletedAt']).astimezone(tz.utc)
 
     def __str__(self) -> str:
-        return f'ATTACHMENT {".".join([self.__name["name"], self.__name["ext"]])} ({self.__size} byte)'
+        return f'ATTACHMENT {self.__name["name"] + "." + self.__name["ext"]} ({self.__size} byte)'
 
     def get_id(self) -> int:
         return self.__id
@@ -207,12 +209,9 @@ class DeckCard:
         self.__labels = [labels[label['ETag']] for label in card['labels']]
         self.__archived = card['archived']
 
-        attachment_count = card['attachmentCount']
-        if attachment_count > 0:
-            attachments = api.request(f'boards/{bid}/stacks/{sid}/cards/{self.__id}/attachments')
-            self.__attachments = [DeckAttachment(attachment) for attachment in attachments]
-        else:
-            self.__attachments = []
+        self.__attachments = ([DeckAttachment(attachment) for attachment in
+                              api.request(f'boards/{bid}/stacks/{sid}/cards/{self.__id}/attachments')]
+                              if card['attachmentCount'] > 0 else [])
 
         # Timestamps
         self.__creation_time = dt.fromtimestamp(card['createdAt']).astimezone(tz.utc)
@@ -220,8 +219,8 @@ class DeckCard:
         self.__deletion_time = dt.fromtimestamp(card['deletedAt']).astimezone(tz.utc)
 
         # TODO: Fix this obscenity without breaking PEP8, somehow
-        self.__card_due_time = None if card['duedate'] is None else \
-            dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z').astimezone(tz.utc)
+        self.__card_due_time = (None if card['duedate'] is None else
+                                dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z').astimezone(tz.utc))
 
         # Users
         self.__assigned_users = [users[assignee['participant']['primaryKey']] for assignee in card['assignedUsers']]
