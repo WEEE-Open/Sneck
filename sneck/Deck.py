@@ -41,11 +41,13 @@ class DeckUser:
         self.__name = data['displayname']
 
     def __str__(self) -> str:
-        # Name contains username, so returning only name is not ambiguous
-        return self.__name
+        return f'{self.__name} (PK={self.__pkey}, UUID={self.__uuid})'
 
     def __repr__(self) -> str:
         return self.__pkey
+
+    def get_name(self) -> str:
+        return self.__name
 
 
 class DeckAcl:
@@ -277,6 +279,12 @@ class DeckCard:
 
     def get_assigned_users(self) -> list[DeckUser]:
         return self.__assigned_users
+
+    def is_assigned(self, user: Union[DeckUser, str]):
+        if isinstance(user, DeckUser):
+            return user in self.__assigned_users
+        elif isinstance(user, str):
+            return user in [user.get_name() for user in self.__assigned_users]
 
     def has_label(self, label: Union[DeckLabel, str]) -> bool:
         if isinstance(label, DeckLabel):
