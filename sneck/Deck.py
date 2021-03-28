@@ -3,7 +3,7 @@ import json
 import os
 import logging
 
-from typing import Optional
+from typing import Optional, Union
 from requests.auth import HTTPBasicAuth
 from datetime import datetime as dt, timezone as tz
 
@@ -15,7 +15,7 @@ class DeckAPI:
         self.__password = password
         self.__decoder = json.decoder.JSONDecoder()
 
-    def request(self, binding: str) -> [list, dict]:
+    def request(self, binding: str) -> Union[list, dict]:
         logging.debug(f'Making request {self.__api_base + binding}...')
         response = requests.get(self.__api_base + binding,
                                 headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
@@ -278,7 +278,7 @@ class DeckCard:
     def get_assigned_users(self) -> list[DeckUser]:
         return self.__assigned_users
 
-    def has_label(self, label: [DeckLabel, str]) -> bool:
+    def has_label(self, label: Union[DeckLabel, str]) -> bool:
         if isinstance(label, DeckLabel):
             for item in self.__labels:
                 if item is label:
