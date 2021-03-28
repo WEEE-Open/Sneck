@@ -20,3 +20,11 @@ class DeckAPIRequestError(Exception):
         self.reason = reason
         self.status = status
         self.text = text
+
+
+class DeckInvalidInputError(Exception):
+    """
+    When a method is called with one or more parameters of wrong type
+    """
+    def __init__(self, text: str):
+        self.text = text
