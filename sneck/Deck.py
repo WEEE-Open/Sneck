@@ -22,7 +22,6 @@ class DeckAPI:
             response = requests.get(self.__api_base + binding,
                                     headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
                                     auth=HTTPBasicAuth(self.__username, self.__password))
-            print(response.text)
         except ConnectionError:
             raise APIError(APIError.Reason.CONNECTION, 0, 'Connection error.')
         except HTTPError:
@@ -49,10 +48,10 @@ class DeckUser:
         self.__name = data['displayname']
 
     def __str__(self) -> str:
-        return self.__name
+        return f'{self.__name} (PK={self.__pkey}, UID={self.__uuid}, Type={self.__type})'
 
     def __repr__(self) -> str:
-        return f'User "{self.__name}" (PK={self.__pkey}, UID={self.__uuid}, Type={self.__type})'
+        return self.__pkey
 
     def get_name(self) -> str:
         return self.__name
@@ -90,7 +89,9 @@ class DeckAcl:
         self.__owner = acl['owner']
 
     def __str__(self) -> str:
-        return str(self.__principal) + f' [{",".join(k for k, v in self.__permissions.items() if v == True)}]'
+        return (str(self.__principal) +
+                f' [{",".join(k for k, v in self.__permissions.items() if v == True)}]' +
+                f' (ACL #{self.__id}, Board #{self.__board_id}, Type {self.__type}')
 
     def __repr__(self) -> str:
         return '.'.join([self.__board_id, self.__id])
@@ -129,7 +130,8 @@ class DeckLabel:
         self.__last_edited_date = dt.fromtimestamp(label['lastModified']).astimezone(tz.utc)
 
     def __str__(self) -> str:
-        return f'{self.__title} (#{self.__color.upper()})'
+        return (f'{self.__title} (#{self.__color.upper()} - ' +
+                f'Label #{self.__id}, Board #{self.__board_id}, Last edited on {self.__last_edited_date})')
 
     def __repr__(self) -> str:
         return self.__tag
@@ -173,7 +175,15 @@ class DeckAttachment:
                                 if attachment['deletedAt'] != 0 else None)
 
     def __str__(self) -> str:
-        return f'ATTACHMENT {self.__name["name"] + "." + self.__name["ext"]} ({self.__size} byte)'
+        result = f'ATTACHMENT "{self.__name["dir"] + "/" + self.__name["name"] + "." + self.__name["ext"]}:"\n'
+        result += f'    Size: {self.__size} bytes\n'
+        result += f'    MIME: {self.__mime}\n'
+        result += f'    Owner: {self.__owner}\n'
+        result += f'    Created: {self.__creation_time}\n'
+        result += f'    Last edited: {self.__last_edit_time}\n'
+        result += f'    Deleted{"at" + str(self.__deletion_time) if self.__deletion_time else ": No"}\n'
+
+        return result
 
     def __repr__(self) -> str:
         return '.'.join([self.__board_id, self.__stack_id, self.__card_id, self.__id])
@@ -257,13 +267,17 @@ class DeckCard:
         self.__last_editor = card['lastEditor']
 
     def __str__(self) -> str:
-        result = f'CARD "{self.__title}":\n'
+        result = f'CARD "{self.__title}" (Card #{self.__id}, Stack #{self.__stack_id}, Board #{self.__board_id}):\n'
+        result += f'    Type: {self.__type}\n'
         result += f'    Description: "{self.get_shortened_description(50)}"\n'
         result += f'    Labels: {", ".join(label.get_title() for label in self.__labels)}\n'
         result += f'    Attachments: {"None" if len(self.__attachments) == 0 else len(self.__attachments)}\n'
         result += f'    Archived: {"Yes" if self.__archived else "No"}\n'
-        result += f'    Due date: {self.__card_due_time}\n'
-        result += f'    Creator: {self.__owner}\n'
+        result += f'    Due date: {self.__card_due_time if self.__card_due_time else "None"}\n'
+        result += f'    Order: {self.__order}\n'
+        result += f'    Unread comments: {self.__unread_comments}\n'
+        result += f'    Deleted{" at" + str(self.__deletion_time) if self.__deletion_time else ": No"}\n'
+        result += f'    Created at {self.__creation_time} by {self.__owner}\n'
 
         if self.__last_editor is not None:
             result += f'    Last edit at {self.__last_edited_time} by {self.__last_editor}\n'
@@ -358,7 +372,7 @@ class DeckCard:
 
 class DeckStack:
     def __init__(self, stack: dict, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI):
-        # Internal identifiers for the board
+        # Internal identifiers for the stack
         self.__board_id = stack['boardId']
         self.__id = stack['id']
         self.__tag = stack['ETag']
@@ -373,8 +387,14 @@ class DeckStack:
                         if 'cards' in stack else [])
 
     def __str__(self) -> str:
-        cards = "\n    ".join([line for card in self.__cards for line in str(card).splitlines()])
-        return f'STACK "{self.__title}"\n    {cards}'
+        result = f'STACK "{self.__title}" (Stack #{self.__id}, Board #{self.__board_id}):\n'
+        result += f'    Order: {self.__order}\n'
+        result += f'    Last modification at {self.__last_edited_time}\n'
+        result += f'    Deleted{" at" + str(self.__deletion_time) if self.__deletion_time else ": no"}\n'
+        result += f'    CARDS:\n        '
+        result += "\n            ".join([line for card in self.__cards for line in str(card).splitlines()]) + '\n'
+
+        return result
 
     def __repr__(self) -> str:
         return self.__tag
@@ -446,15 +466,19 @@ class DeckBoard:
                          for stack in api.request(f'boards/{self.__id}/stacks')]
 
     def __str__(self):
-        result = ''
-
-        result += f'BOARD "{self.__title}"\n'
+        result = f'BOARD "{self.__title}" (Board #{self.__id}):\n'
         result += f'    Color: #{self.__color.upper()}\n'
         result += f'    Archived: {self.__archived}\n'
         result += f'    Shared to current user: {"No" if self.__shared == 0 else "Yes"}\n'
         result += f'    Deleted: {"No" if self.__deletion_time is None else f"Yes, at {self.__deletion_time}"}\n'
         result += f'    Owner: {self.__owner}\n'
         result += f'    Last modification at {self.__last_edited_time}\n'
+        result += f'    Deleted{" at" + str(self.__deletion_time) if self.__deletion_time else ": No"}\n'
+        result += f'    PERMISSIONS:\n'
+        result += f'        Read: {self.__permissions["PERMISSION_READ"]}\n'
+        result += f'        Edit: {self.__permissions["PERMISSION_EDIT"]}\n'
+        result += f'        Manage: {self.__permissions["PERMISSION_MANAGE"]}\n'
+        result += f'        Share: {self.__permissions["PERMISSION_SHARE"]}\n'
 
         result += (' '*4 + 'LABELS:\n' + ' '*8 +
                    '\n        '.join([e for i in [v for k, v in self.__labels.items()] for e in str(i).splitlines()]) +
