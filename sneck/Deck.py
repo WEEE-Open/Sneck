@@ -38,15 +38,14 @@ class DeckUser:
         self.__uuid = data['uid']
         self.__type = data['type']
 
-        self.name = data['displayname']
+        self.__name = data['displayname']
 
     def __str__(self) -> str:
         # Name contains username, so returning only name is not ambiguous
-        return self.name
+        return self.__name
 
     def __repr__(self) -> str:
         return self.__pkey
-
 
 class DeckAcl:
     def __init__(self, data: dict, users: dict):
@@ -66,10 +65,16 @@ class DeckAcl:
         if data['participant']['primaryKey'] not in users:
             users[data['participant']['primaryKey']] = DeckUser(data['participant'])
 
-        self.principal = users[data['participant']['primaryKey']]
+        self.__principal = users[data['participant']['primaryKey']]
 
         # If the user is the owner of the entity
-        self.owner = data['owner']
+        self.__owner = data['owner']
+
+    def __str__(self) -> str:
+        return str(self.__principal) + f' [{",".join(k for k, v in self.__permissions.items() if v == True)}]'
+
+    def get_principal(self) -> DeckUser:
+        return self.__principal
 
     def can_edit(self) -> bool:
         return self.__permissions['edit']
@@ -80,28 +85,38 @@ class DeckAcl:
     def can_manage(self) -> bool:
         return self.__permissions['manage']
 
-    def __str__(self) -> str:
-        return str(self.principal) + f' [{",".join(k for k,v in self.__permissions.items() if v == True)}]'
+    def is_owner(self) -> bool:
+        return self.__owner
 
 
 class DeckLabel:
-    def __init__(self, label: dict):
+    def __init__(self, label: dict, bid: int):
         # Internal identifiers for the label
+        self.__board_id = bid
         self.__id = label['id']
         self.__tag = label['ETag']
 
         # Not sure about what this is? We'll store it but keep it private and not expose it for now...
         self.__card_id = label['cardId']
 
-        self.title = label['title']
-        self.color = label['color']
-        self.last_edited_date = dt.fromtimestamp(label['lastModified']).astimezone(tz.utc)
+        self.__title = label['title']
+        self.__color = label['color']
+        self.__last_edited_date = dt.fromtimestamp(label['lastModified']).astimezone(tz.utc)
 
     def __str__(self) -> str:
-        return f'{self.title} (#{self.color.upper()})'
+        return f'{self.__title} (#{self.__color.upper()})'
+
+    def __repr__(self) -> str:
+        return self.__tag
 
     def get_title(self) -> str:
-        return self.title
+        return self.__title
+
+    def get_color(self) -> str:
+        return self.__color
+
+    def get_last_modification_time(self) -> dt:
+        return self.__last_edited_date
 
 
 class DeckAttachment:
@@ -127,6 +142,42 @@ class DeckAttachment:
 
     def get_id(self) -> int:
         return self.__id
+
+    def get_type(self) -> str:
+        return self.__type
+
+    def get_size(self) -> int:
+        return self.__size
+
+    def get_mime(self) -> str:
+        return self.__mime
+
+    def get_full_name(self) -> str:
+        # Not using os.path.join as this is nextcloud dependant and not client dependant
+        # Using slash as I assume this will be the separator used (since both HTTP and Linux use it)
+        # TODO: Figure out which separator NC uses (until now only the value "." has been observed for dir)
+        return self.__name['dir'] + '/' + self.__name['name'] + '.' + self.__name['ext']
+
+    def get_directory(self) -> str:
+        return self.__name['dir']
+
+    def get_name(self) -> str:
+        return self.__name['name']
+
+    def get_extension(self) -> str:
+        return self.__name['ext']
+
+    def get_owner(self) -> str:
+        return self.__owner
+
+    def get_creation_time(self) -> dt:
+        return self.__creation_time
+
+    def get_last_modification_time(self) -> dt:
+        return self.__last_edit_time
+
+    def get_deletion_time(self) -> dt:
+        return self.__deletion_time
 
 
 class DeckCard:
@@ -322,7 +373,7 @@ class DeckBoard:
 
         self.__title = board['title']
         self.__color = board['color']
-        self.__labels = {label['ETag']: DeckLabel(label) for label in board['labels']}
+        self.__labels = {label['ETag']: DeckLabel(label, self.__id) for label in board['labels']}
 
         # Users and access control
         self.__users = {user['primaryKey']: DeckUser(user) for user in board['users']}
@@ -381,7 +432,7 @@ class DeckBoard:
             return self.__permissions['PERMISSION_READ']
         else:
             for acl in self.__acl:
-                if repr(acl.principal) == pk:
+                if repr(acl.__principal) == pk:
                     return True
             return False
 
@@ -390,7 +441,7 @@ class DeckBoard:
             return self.__permissions['PERMISSION_EDIT']
         else:
             for acl in self.__acl:
-                if repr(acl.principal) == pk:
+                if repr(acl.__principal) == pk:
                     return acl.can_edit()
             return False
 
@@ -399,7 +450,7 @@ class DeckBoard:
             return self.__permissions['PERMISSION_MANAGE']
         else:
             for acl in self.__acl:
-                if repr(acl.principal) == pk:
+                if repr(acl.__principal) == pk:
                     return acl.can_manage()
             return False
 
@@ -408,7 +459,7 @@ class DeckBoard:
             return self.__permissions['PERMISSION_SHARE']
         else:
             for acl in self.__acl:
-                if repr(acl.principal) == pk:
+                if repr(acl.__principal) == pk:
                     return acl.can_share()
             return False
 
