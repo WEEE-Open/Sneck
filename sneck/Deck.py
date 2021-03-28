@@ -395,8 +395,6 @@ class DeckBoard:
         self.__shared = board['shared']  # Board shared to the current user (not owned by current user)
 
         # Timestamps for deletion and last edit. Deletion timestamp is 0 if the board has not been deleted
-
-        # TODO: Fix this obscenity without breaking PEP8, somehow
         self.__deletion_time = (None if board['deletedAt'] == 0
                                 else dt.fromtimestamp(board['deletedAt']).astimezone(tz.utc))
 
@@ -418,16 +416,16 @@ class DeckBoard:
         result += f'    Last modification at {self.__last_edited_time}\n'
 
         result += (' '*4 + 'LABELS:\n' + ' '*8 +
-                   '\n        '.join([e for i in [k for k, v in self.__labels.items()] for e in str(i).splitlines()]) +
+                   '\n        '.join([e for i in [v for k, v in self.__labels.items()] for e in str(i).splitlines()]) +
                    '\n' if len(self.__labels) > 0 else '')
 
         result += (' '*4 + 'USERS:\n' + ' '*8 +
-                   '\n        '.join([e for i in [k for k, v in self.__users.items()] for e in str(i).splitlines()]) +
+                   '\n        '.join([e for i in [v for k, v in self.__users.items()] for e in str(i).splitlines()]) +
                    '\n' if len(self.__users) > 0 else '')
 
         result += (' '*4 + 'ACL:\n' + ' '*8 +
-                   '\n        '.join([e for i in self.__acl for e in str(i).splitlines()]) +
-                   '\n' if len(self.__users) > 0 else '')
+                   '\n        '.join([e for i in self.__acl for e in str(i).splitlines()])
+                   + '\n' if len(self.__users) > 0 else '')
 
         result += (' '*4 + 'STACKS:\n' + ' '*8 +
                    '\n        '.join([e for i in self.__stacks for e in str(i).splitlines()])
