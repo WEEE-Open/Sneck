@@ -148,6 +148,9 @@ class DeckLabel:
     def get_id(self) -> int:
         return self.__id
 
+    def get_tag(self) -> str:
+        return self.__tag
+
 
 class DeckAttachment:
     def __init__(self, attachment: dict, sid: int, bid: int):
@@ -369,6 +372,9 @@ class DeckCard:
     def get_id(self) -> int:
         return self.__id
 
+    def get_tag(self) -> str:
+        return self.__tag
+
 
 class DeckStack:
     def __init__(self, stack: dict, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI):
@@ -429,6 +435,9 @@ class DeckStack:
 
     def get_id(self) -> int:
         return self.__id
+
+    def get_tag(self) -> str:
+        return self.__tag
 
 
 class DeckBoard:
@@ -579,6 +588,9 @@ class DeckBoard:
 
     def get_id(self) -> int:
         return self.__id
+
+    def get_tag(self) -> str:
+        return self.__tag
 
 
 class Deck:
