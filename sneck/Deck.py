@@ -41,11 +41,22 @@ class DeckAPI:
 
 
 class DeckUser:
+    class Type(Enum):
+        USER = 0
+        GROUP = 1
+        CIRCLE = 7
+
+    __types = {
+        '0': Type.USER,
+        '1': Type.GROUP,
+        '7': Type.CIRCLE
+    }
+
     def __init__(self, data: dict) -> None:
         # Internal user identifiers and types
         self.__pkey = data['primaryKey']
         self.__uuid = data['uid']
-        self.__type = data['type']
+        self.__type = self.__types[str(data['type'])]
         self.__name = data['displayname']
 
     def __str__(self) -> str:
@@ -212,9 +223,7 @@ class DeckAttachment:
         return self.__mime
 
     def get_full_name(self) -> str:
-        # Not using os.path.join as this is nextcloud dependant and not client dependant
-        # Using slash as I assume this will be the separator used (since both HTTP and Linux use it)
-        # TODO: Figure out which separator NC uses (until now only the value "." has been observed for dir)
+        # Using slash as path separator as I assume this will be the separator used (since both HTTP and Linux use it)
         return self.__name['dir'] + '/' + self.__name['name'] + '.' + self.__name['ext']
 
     def get_directory(self) -> str:
@@ -246,23 +255,25 @@ class DeckAttachment:
 
 
 class DeckCard:
+    class Type(Enum):
+        PLAIN = 0
+
+    __types = {
+        'plain': Type.PLAIN
+    }
+
     def __init__(self, card: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI) -> None:
         # Internal identifiers for the card
         self.__board_id = bid
         self.__stack_id = card['stackId']
         self.__id = card['id']
         self.__tag = card['ETag']
-
-        # TODO: Document possible values and meaning, use it in a meaningful way?
-        self.__type = card['type']
-
+        self.__type = self.__types[card['type']]
         self.__order = card['order']
-
         self.__title = card['title']
         self.__description = card['description'].strip()
         self.__labels = [labels[label['ETag']] for label in card['labels']]
         self.__archived = card['archived']
-
         self.__attachments = ([DeckAttachment(attachment, self.__stack_id, self.__board_id) for attachment in
                               api.request(f'boards/{bid}/stacks/{self.__stack_id}/cards/{self.__id}/attachments')]
                               if card['attachmentCount'] > 0 else [])
