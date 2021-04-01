@@ -678,8 +678,21 @@ class Deck:
     def get_users(self) -> list[DeckUser]:
         return [v for k, v in self.__users]
 
-    def get_user(self, pk: str) -> Optional[DeckUser]:
-        return self.__users[pk] if pk in self.__users else None
+    def get_user(self, pk=None, uid=None, name=None) -> Optional[DeckUser]:
+        if pk is not None:
+            return self.__users[pk] if pk in self.__users else None
+        elif uid is not None:
+            for k, v in self.__users:
+                if k.get_id() == uid:
+                    return k
+            return None
+        elif name is not None:
+            for k, v in self.__users:
+                if k.get_name() == name:
+                    return k
+            return None
+        else:
+            return None
 
 
 # Test basic program functionality
