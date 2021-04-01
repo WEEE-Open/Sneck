@@ -396,6 +396,9 @@ class DeckCard:
     def is_archived(self) -> bool:
         return self.__archived
 
+    def is_deleted(self) -> bool:
+        return self.__deletion_time is not None
+
     def get_id(self) -> int:
         return self.__id
 
@@ -444,10 +447,13 @@ class DeckStack:
     def get_order(self) -> int:
         return self.__order
 
-    def get_cards(self, label: Union[str, DeckLabel] = None, assigned: Union[str, DeckUser] = None) -> list[DeckCard]:
-        return sorted([card for card in self.__cards
-                       if (not label or card.has_label(label)) and (not assigned or card.is_assigned(assigned))],
-                      key=lambda c: c.get_order())
+    def get_cards(self, label: Optional[Union[str, DeckLabel]] = None,
+                  assigned: Optional[Union[str, DeckUser]] = None,
+                  deleted: Optional[bool] = None) -> list[DeckCard]:
+        return sorted(
+            [card for card in self.__cards if (not label or card.has_label(label))
+             and (not assigned or card.is_assigned(assigned)) and (deleted is None or card.is_deleted() == deleted)],
+            key=lambda c: c.get_order())
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
         return sorted([c for c in self.__cards if c.get_due_time() and (past or c.get_due_time() >= dt.now(tz.utc))],
@@ -627,10 +633,13 @@ class DeckBoard:
         result = [item for item in self.__stacks if item.get_id() == sid]
         return result[0] if len(result) == 1 else None
 
-    def get_cards(self, label: Union[str, DeckLabel] = None, assigned: Union[str, DeckUser] = None) -> list[DeckCard]:
-        return sorted([card for stack in self.__stacks for card in stack.get_cards()
-                       if (not label or card.has_label(label)) and (not assigned or card.is_assigned(assigned))],
-                      key=lambda c: c.get_oder())
+    def get_cards(self, label: Optional[Union[str, DeckLabel]] = None,
+                  assigned: Optional[Union[str, DeckUser]] = None,
+                  deleted: Optional[bool] = None) -> list[DeckCard]:
+        return sorted(
+            [card for stack in self.__stacks for card in stack.get_cards()
+             if (not label or card.has_label(label)) and (not assigned or card.is_assigned(assigned))
+             and (deleted is None or card.is_deleted() == deleted)], key=lambda c: c.get_oder())
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
         return sorted([c for events in [stack.get_events(past=past) for stack in self.__stacks] for c in events
@@ -686,10 +695,13 @@ class Deck:
     def get_next_event(self) -> Optional[DeckCard]:
         return self.__events[0]
 
-    def get_cards(self, label: Union[str, DeckLabel] = None, assigned: Union[str, DeckUser] = None) -> list[DeckCard]:
-        return sorted([card for board in self.__boards for stack in board.get_stacks() for card in stack
-                       if (not label or card.has_label(label)) and (not assigned or card.is_assigned(assigned))],
-                      key=lambda c: c.get_order())
+    def get_cards(self, label: Optional[Union[str, DeckLabel]] = None,
+                  assigned: Optional[Union[str, DeckUser]] = None,
+                  deleted: Optional[bool] = None) -> list[DeckCard]:
+        return sorted(
+            [card for board in self.__boards for stack in board.get_stacks() for card in stack
+             if (not label or card.has_label(label)) and (not assigned or card.is_assigned(assigned))
+             and (deleted is None or card.is_deleted() == deleted)], key=lambda c: c.get_order())
 
     def get_card(self, cid: int) -> Optional[DeckCard]:
         for board in self.get_boards():
