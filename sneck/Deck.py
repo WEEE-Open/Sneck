@@ -442,9 +442,10 @@ class DeckStack:
     def get_order(self) -> int:
         return self.__order
 
-    # TODO: Order them. Add filters (label, other?)
-    def get_cards(self) -> list[DeckCard]:
-        return self.__cards
+    def get_cards(self, label: Union[str, DeckLabel] = None, assigned: Union[str, DeckUser] = None) -> list[DeckCard]:
+        return sorted([card for card in self.__cards
+                       if (not label or card.has_label(label)) and (not assigned or card.is_assigned(assigned))],
+                      key=lambda c: c.get_order())
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
         return sorted([c for c in self.__cards if c.get_due_time() and (past or c.get_due_time() >= dt.now(tz.utc))],
@@ -602,17 +603,17 @@ class DeckBoard:
     def get_notification_settings(self) -> NotificationType:
         return self.__notifications
 
-    # TODO: Order them. Add filters (which ones?)
     def get_stacks(self) -> list[DeckStack]:
-        return self.__stacks
+        return sorted(self.__stacks, key=lambda s: s.get_order())
 
     def get_stack(self, sid: int) -> Optional[DeckStack]:
         result = [item for item in self.__stacks if item.get_id() == sid]
         return result[0] if len(result) == 1 else None
 
-    # TODO: Order them. Add filters (label, other?)
-    def get_cards(self) -> list[DeckCard]:
-        return [card for stack in self.__stacks for card in stack.get_cards()]
+    def get_cards(self, label: Union[str, DeckLabel] = None, assigned: Union[str, DeckUser] = None) -> list[DeckCard]:
+        return sorted([card for stack in self.__stacks for card in stack.get_cards()
+                       if (not label or card.has_label(label)) and (not assigned or card.is_assigned(assigned))],
+                      key=lambda c: c.get_oder())
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
         return sorted([c for events in [stack.get_events(past=past) for stack in self.__stacks] for c in events
@@ -668,9 +669,10 @@ class Deck:
     def get_next_event(self) -> Optional[DeckCard]:
         return self.__events[0]
 
-    # TODO: Order them. Add filters (label, other?)
-    def get_cards(self) -> list[DeckCard]:
-        return [card for board in self.__boards for stack in board.get_stacks() for card in stack]
+    def get_cards(self, label: Union[str, DeckLabel] = None, assigned: Union[str, DeckUser] = None) -> list[DeckCard]:
+        return sorted([card for board in self.__boards for stack in board.get_stacks() for card in stack
+                       if (not label or card.has_label(label)) and (not assigned or card.is_assigned(assigned))],
+                      key=lambda c: c.get_order())
 
     def get_card(self, cid: int) -> Optional[DeckCard]:
         for board in self.get_boards():
