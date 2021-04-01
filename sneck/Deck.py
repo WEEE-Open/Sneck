@@ -41,6 +41,7 @@ class DeckAPI:
 
 
 class DeckUser:
+    @unique
     class Type(Enum):
         USER = 0
         GROUP = 1
@@ -252,6 +253,7 @@ class DeckAttachment:
 
 
 class DeckCard:
+    @unique
     class Type(Enum):
         PLAIN = 0
         TEXT = 1
@@ -467,6 +469,7 @@ class DeckStack:
 
 
 class DeckBoard:
+    @unique
     class NotificationType(Enum):
         OFF = 0         # No notifications for events
         ASSIGNED = 1    # Notifications only for events to which the user is assigned
@@ -495,6 +498,8 @@ class DeckBoard:
         # Users and access control
         self.__users = {user['primaryKey']: DeckUser(user) for user in board['users']}
         self.__owner = self.__users[board['owner']['primaryKey']]
+
+        # TODO: Make a dictionary
         self.__acl = [DeckAcl(acl, self.__users) for acl in board['acl']]
 
         self.__archived = board['archived']  # Board archived by current user
@@ -588,8 +593,13 @@ class DeckBoard:
     def get_labels(self) -> list[DeckLabel]:
         return [v for k, v in self.__labels.items()]
 
+    # TODO: Expand
     def get_users(self) -> list[DeckUser]:
         return [v for k, v in self.__users.items()]
+
+    # TODO: Implement after makin __acl a dictionary
+    def get_acl(self, user: DeckUser) -> Optional[DeckAcl]:
+        pass
 
     def get_owner(self) -> DeckUser:
         return self.__owner
