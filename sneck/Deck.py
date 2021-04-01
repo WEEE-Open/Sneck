@@ -54,22 +54,21 @@ class DeckUser:
 
     def __init__(self, data: dict) -> None:
         # Internal user identifiers and types
-        self.__pkey = data['primaryKey']
         self.__uuid = data['uid']
         self.__type = self.__types[str(data['type'])]
         self.__name = data['displayname']
 
     def __str__(self) -> str:
-        return f'{self.__name} (PK={self.__pkey}, UID={self.__uuid}, Type={self.__type})'
+        return f'{self.__name} (UID={self.__uuid}, Type={self.__type})'
 
     def __repr__(self) -> str:
-        return self.__pkey
+        return self.__uuid
 
     def get_name(self) -> str:
         return self.__name
 
-    def get_primary_key(self) -> str:
-        return self.__pkey
+    def get_type(self) -> Type:
+        return self.__type
 
     def get_id(self) -> str:
         return self.__uuid
@@ -84,9 +83,6 @@ class DeckAcl:
                               'share': acl['permissionShare'],
                               'manage': acl['permissionManage']}
 
-        # TODO: Figure out what is this and properly expose it
-        self.__type = acl['type']
-
         # ACLs are different wrt to user management than cards or every other object that contains DeckUsers
         # While the list of users obtained with the "/boards?details=1" API call contains all effective users
         # of the board, that is people that can create and modify content inside the board, ACLs can also contain
@@ -96,6 +92,9 @@ class DeckAcl:
         if acl['participant']['primaryKey'] not in users:
             users[acl['participant']['primaryKey']] = DeckUser(acl['participant'])
         self.__principal = users[acl['participant']['primaryKey']]
+
+        # Same as the type for DeckUser
+        self.__type = self.__principal.get_type()
 
         # If the user is the owner of the entity
         self.__owner = acl['owner']
@@ -177,7 +176,7 @@ class DeckAttachment:
         'file': Type.NEXTCLOUD_FILE
     }
 
-    def __init__(self, attachment: dict, sid: int, bid: int) -> None:
+    def __init__(self, attachment: dict, sid: int, bid: int, users: dict[DeckUser]) -> None:
         self.__id = attachment['id']
         self.__card_id = attachment['cardId']
         self.__stack_id = sid
@@ -194,9 +193,7 @@ class DeckAttachment:
                        'name': attachment['extendedData']['info']['filename'],
                        'ext': attachment['extendedData']['info']['extension']}
 
-        # TODO: Is this the primary key or UUID? If the former, use it to retrieve actual DeckUser
-        self.__owner = attachment['createdBy']
-
+        self.__owner = users[attachment['createdBy']]
         self.__creation_time = dt.fromtimestamp(attachment['createdAt']).astimezone(tz.utc)
         self.__last_edit_time = dt.fromtimestamp(attachment['lastModified']).astimezone(tz.utc)
         self.__deletion_time = (dt.fromtimestamp(attachment['deletedAt']).astimezone(tz.utc)
@@ -235,7 +232,7 @@ class DeckAttachment:
     def get_extension(self) -> str:
         return self.__name['ext']
 
-    def get_owner(self) -> str:
+    def get_owner(self) -> DeckUser:
         return self.__owner
 
     def get_creation_time(self) -> dt:
@@ -257,9 +254,11 @@ class DeckAttachment:
 class DeckCard:
     class Type(Enum):
         PLAIN = 0
+        TEXT = 1
 
     __types = {
-        'plain': Type.PLAIN
+        'plain': Type.PLAIN,
+        'text': Type.TEXT       # Documentation says this type should not exist, but example cards use it
     }
 
     def __init__(self, card: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI) -> None:
@@ -274,7 +273,7 @@ class DeckCard:
         self.__description = card['description'].strip()
         self.__labels = [labels[label['ETag']] for label in card['labels']]
         self.__archived = card['archived']
-        self.__attachments = ([DeckAttachment(attachment, self.__stack_id, self.__board_id) for attachment in
+        self.__attachments = ([DeckAttachment(attachment, self.__stack_id, self.__board_id, users) for attachment in
                               api.request(f'boards/{bid}/stacks/{self.__stack_id}/cards/{self.__id}/attachments')]
                               if card['attachmentCount'] > 0 else [])
 
@@ -293,9 +292,7 @@ class DeckCard:
         self.__assigned_users = [users[assignee['participant']['primaryKey']] for assignee in card['assignedUsers']]
         self.__owner = users[card['owner']['primaryKey']]
 
-        # NOTE: This is just the UUID/PK of the user not the entire structure
-        # TODO: Figure out whether this is a UUID or PK and in case it's the PK just get the DeckUser from dict
-        self.__last_editor = card['lastEditor']
+        self.__last_editor = users[card['lastEditor']] if card['lastEditor'] is not None else None
 
     def __str__(self) -> str:
         result = f'CARD "{self.__title}" (Card #{self.__id}, Stack #{self.__stack_id}, Board #{self.__board_id}):\n'
@@ -353,7 +350,7 @@ class DeckCard:
     def get_last_modified_time(self) -> dt:
         return self.__last_edited_time
 
-    def get_last_modified_user(self) -> dt:
+    def get_last_modified_user(self) -> DeckUser:
         return self.__last_editor
 
     def get_deletion_time(self) -> Optional[dt]:
@@ -449,7 +446,7 @@ class DeckStack:
     def get_cards(self) -> list[DeckCard]:
         return self.__cards
 
-    def get_events(self, past=False) -> list[DeckCard]:
+    def get_events(self, past: bool = False) -> list[DeckCard]:
         return sorted([c for c in self.__cards if c.get_due_time() and (past or c.get_due_time() >= dt.now(tz.utc))],
                       key=lambda x: x.get_due_time())
 
@@ -469,6 +466,17 @@ class DeckStack:
 
 
 class DeckBoard:
+    class NotificationType(Enum):
+        OFF = 0         # No notifications for events
+        ASSIGNED = 1    # Notifications only for events to which the user is assigned
+        ALL = 2         # Notifications for all events
+
+    __notification_type = {
+        'off': NotificationType.OFF,
+        'assigned': NotificationType.ASSIGNED,
+        'all': NotificationType.ALL
+    }
+
     def __init__(self, board: dict, api: DeckAPI) -> None:
         # Internal identifiers for the board
         self.__id = board['id']
@@ -476,8 +484,7 @@ class DeckBoard:
 
         # Internal board settings
         self.__permissions = board['permissions']  # Permissions for this user (r,w,share,manage)
-        # TODO: These are not documented, find possible values and their meaning and expose them accordingly
-        self.__notification_settings = board['settings']['notify-due']  # Notification settings for board
+        self.__notifications = self.__notification_type[board['settings']['notify-due']]
         self.__synchronize = board['settings']['calendar']  # Whether the board synchronizes with CalDAV
 
         self.__title = board['title']
@@ -538,35 +545,38 @@ class DeckBoard:
     def __repr__(self) -> str:
         return self.__tag
 
-    def can_read(self, pk=None) -> bool:
-        if not pk:
+    def can_read(self, uid: Optional[str] = None) -> bool:
+        if not uid:
             return self.__permissions['PERMISSION_READ']
         else:
-            return pk in [repr(item.get_principal()) for item in self.__acl]
+            return uid in [repr(item.get_principal()) for item in self.__acl]
 
-    def can_edit(self, pk=None) -> bool:
-        if not pk:
+    def can_edit(self, uid: Optional[str] = None) -> bool:
+        if not uid:
             return self.__permissions['PERMISSION_EDIT']
         else:
-            return pk in [repr(item.get_principal()) for item in self.__acl if item.can_edit()]
+            return uid in [repr(item.get_principal()) for item in self.__acl if item.can_edit()]
 
-    def can_manage(self, pk=None) -> bool:
-        if not pk:
+    def can_manage(self, uid: Optional[str] = None) -> bool:
+        if not uid:
             return self.__permissions['PERMISSION_MANAGE']
         else:
-            return pk in [repr(item.get_principal()) for item in self.__acl if item.can_manage()]
+            return uid in [repr(item.get_principal()) for item in self.__acl if item.can_manage()]
 
-    def can_share(self, pk=None) -> bool:
-        if not pk:
+    def can_share(self, uid: Optional[str] = None) -> bool:
+        if not uid:
             return self.__permissions['PERMISSION_SHARE']
         else:
-            return pk in [repr(item.get_principal()) for item in self.__acl if item.can_share()]
+            return uid in [repr(item.get_principal()) for item in self.__acl if item.can_share()]
 
     def is_archived(self) -> bool:
         return self.__archived
 
     def is_shared(self) -> bool:
         return self.__shared
+
+    def is_calendar_synchronized(self) -> bool:
+        return self.__synchronize
 
     def get_title(self) -> str:
         return self.__title
@@ -589,6 +599,9 @@ class DeckBoard:
     def get_last_modification_time(self) -> dt:
         return self.__last_edited_time
 
+    def get_notification_settings(self) -> NotificationType:
+        return self.__notifications
+
     # TODO: Order them. Add filters (which ones?)
     def get_stacks(self) -> list[DeckStack]:
         return self.__stacks
@@ -601,7 +614,7 @@ class DeckBoard:
     def get_cards(self) -> list[DeckCard]:
         return [card for stack in self.__stacks for card in stack.get_cards()]
 
-    def get_events(self, past=False) -> list[DeckCard]:
+    def get_events(self, past: bool = False) -> list[DeckCard]:
         return sorted([c for events in [stack.get_events(past=past) for stack in self.__stacks] for c in events
                        if c.get_due_time() and (past or c.get_due_time() >= dt.now(tz.utc))],
                       key=lambda x: x.get_due_time())
@@ -649,7 +662,7 @@ class Deck:
         # Not handling exception is intentional: let the client handle it according to application
         self.download()
 
-    def get_events(self, past=False) -> list[DeckCard]:
+    def get_events(self, past: bool = False) -> list[DeckCard]:
         return [e for e in self.__events if past or e.get_due_time >= dt.now(tz.utc)]
 
     def get_next_event(self) -> Optional[DeckCard]:
@@ -678,21 +691,15 @@ class Deck:
     def get_users(self) -> list[DeckUser]:
         return [v for k, v in self.__users]
 
-    def get_user(self, pk=None, uid=None, name=None) -> Optional[DeckUser]:
-        if pk is not None:
-            return self.__users[pk] if pk in self.__users else None
-        elif uid is not None:
-            for k, v in self.__users:
-                if k.get_id() == uid:
-                    return k
-            return None
+    def get_user(self, uid: str = None, name: str = None) -> Optional[DeckUser]:
+        if uid is not None:
+            return self.__users[uid] if uid in self.__users else None
         elif name is not None:
             for k, v in self.__users:
                 if k.get_name() == name:
                     return k
             return None
-        else:
-            return None
+        return None
 
 
 # Test basic program functionality
