@@ -6,12 +6,13 @@ from typing import Optional, Union
 from requests import ConnectionError, HTTPError, Timeout, TooManyRedirects
 from requests.auth import HTTPBasicAuth
 from datetime import datetime as dt, timezone as tz
+from enum import Enum, unique
 
 from DeckErrors import DeckAPIRequestError as APIError, DeckInvalidInputError as InputError
 
 
 class DeckAPI:
-    def __init__(self, username: str, password: str, hostname: str, secure: bool):
+    def __init__(self, username: str, password: str, hostname: str, secure: bool) -> None:
         self.__api_base = f'{"https" if secure else "http"}://{hostname}/index.php/apps/deck/api/v1.0/'
         self.__username = username
         self.__password = password
@@ -40,7 +41,7 @@ class DeckAPI:
 
 
 class DeckUser:
-    def __init__(self, data: dict):
+    def __init__(self, data: dict) -> None:
         # Internal user identifiers and types
         self.__pkey = data['primaryKey']
         self.__uuid = data['uid']
@@ -64,7 +65,7 @@ class DeckUser:
 
 
 class DeckAcl:
-    def __init__(self, acl: dict, users: dict):
+    def __init__(self, acl: dict, users: dict) -> None:
         # Internal identifier and type of the ACL
         self.__id = acl['id']
         self.__board_id = acl['boardId']
@@ -116,7 +117,7 @@ class DeckAcl:
 
 
 class DeckLabel:
-    def __init__(self, label: dict):
+    def __init__(self, label: dict) -> None:
         # Internal identifiers for the label
         self.__board_id = label['boardId']
         self.__id = label['id']
@@ -153,16 +154,29 @@ class DeckLabel:
 
 
 class DeckAttachment:
-    def __init__(self, attachment: dict, sid: int, bid: int):
+    @unique
+    class Type(Enum):
+        # Types of attachments
+        NEXTCLOUD_FILE = 1      # Files already present in the NextCloud storage and linked to the card
+        DECK_FILE = 2           # Files uploaded as Deck attachments and stored in the DB
+
+    # Mappings between the literal value of the "type" field and the corresponding enum item
+    __types = {
+        'deck_file': Type.DECK_FILE,
+        'file': Type.NEXTCLOUD_FILE
+    }
+
+    def __init__(self, attachment: dict, sid: int, bid: int) -> None:
         self.__id = attachment['id']
         self.__card_id = attachment['cardId']
         self.__stack_id = sid
         self.__board_id = bid
 
-        # TODO: Document possible values and expose properly
-        self.__type = attachment['type']
+        # I was not able to clearly understand the intent of this field by looking at Deck's code. It looks to be a
+        # metadata storage of sorts, as of now, it only stores the name of the uploaded file
         self.__data = attachment['data']
 
+        self.__type = self.__types[attachment['type']]
         self.__size = attachment['extendedData']['filesize']
         self.__mime = attachment['extendedData']['mimetype']
         self.__name = {'dir': attachment['extendedData']['info']['dirname'],
@@ -224,12 +238,15 @@ class DeckAttachment:
     def get_deletion_time(self) -> Optional[dt]:
         return self.__deletion_time
 
+    def get_data(self) -> str:
+        return self.__data
+
     def get_id(self) -> int:
         return self.__id
 
 
 class DeckCard:
-    def __init__(self, card: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI):
+    def __init__(self, card: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI) -> None:
         # Internal identifiers for the card
         self.__board_id = bid
         self.__stack_id = card['stackId']
@@ -250,7 +267,7 @@ class DeckCard:
                               api.request(f'boards/{bid}/stacks/{self.__stack_id}/cards/{self.__id}/attachments')]
                               if card['attachmentCount'] > 0 else [])
 
-        self.__unread_comments = card['commentsUnread']
+        self.__unread_comments_count = card['commentsUnread']
 
         # Timestamps
         self.__creation_time = dt.fromtimestamp(card['createdAt']).astimezone(tz.utc)
@@ -278,7 +295,7 @@ class DeckCard:
         result += f'    Archived: {"Yes" if self.__archived else "No"}\n'
         result += f'    Due date: {self.__card_due_time if self.__card_due_time else "None"}\n'
         result += f'    Order: {self.__order}\n'
-        result += f'    Unread comments: {self.__unread_comments}\n'
+        result += f'    Unread comments: {self.__unread_comments_count}\n'
         result += f'    Deleted{" at" + str(self.__deletion_time) if self.__deletion_time else ": No"}\n'
         result += f'    Created at {self.__creation_time} by {self.__owner}\n'
 
@@ -347,10 +364,10 @@ class DeckCard:
         result = [attachment for attachment in self.get_attachments() if attachment.get_full_name() == path]
         return result[0] if len(result) == 1 else None
 
-    def get_unread_comments(self) -> int:
-        return self.__unread_comments
+    def get_unread_comments_count(self) -> int:
+        return self.__unread_comments_count
 
-    def is_assigned(self, user: Union[DeckUser, str]):
+    def is_assigned(self, user: Union[DeckUser, str]) -> bool:
         if isinstance(user, DeckUser):
             return user in self.__assigned_users
         elif isinstance(user, str):
@@ -377,7 +394,7 @@ class DeckCard:
 
 
 class DeckStack:
-    def __init__(self, stack: dict, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI):
+    def __init__(self, stack: dict, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI) -> None:
         # Internal identifiers for the stack
         self.__board_id = stack['boardId']
         self.__id = stack['id']
@@ -441,7 +458,7 @@ class DeckStack:
 
 
 class DeckBoard:
-    def __init__(self, board: dict, api: DeckAPI):
+    def __init__(self, board: dict, api: DeckAPI) -> None:
         # Internal identifiers for the board
         self.__id = board['id']
         self.__tag = board['ETag']
@@ -474,7 +491,7 @@ class DeckBoard:
         self.__stacks = [DeckStack(stack, self.__labels, self.__users, api)
                          for stack in api.request(f'boards/{self.__id}/stacks')]
 
-    def __str__(self):
+    def __str__(self) -> str:
         result = f'BOARD "{self.__title}" (Board #{self.__id}):\n'
         result += f'    Color: #{self.__color.upper()}\n'
         result += f'    Archived: {self.__archived}\n'
@@ -594,7 +611,7 @@ class DeckBoard:
 
 
 class Deck:
-    def __init__(self, domain: str, username: str, password: str, secure: bool):
+    def __init__(self, domain: str, username: str, password: str, secure: bool) -> None:
         self.__username = username
         self.__password = password
         self.__api = DeckAPI(username, password, domain, secure)
@@ -605,10 +622,10 @@ class Deck:
 
         self.download()
 
-    def __str__(self):
+    def __str__(self) -> str:
         return '\n\n'.join([str(board) for board in self.__boards.values()])
 
-    def download(self):
+    def download(self) -> None:
         # Not handling exception is intentional: let the client handle it according to application
         boards = self.__api.request('boards?details=1')
 
@@ -616,7 +633,7 @@ class Deck:
         self.__events = sorted([e for ls in [v.get_events(past=True) for k, v in self.__boards.items()] for e in ls],
                                key=lambda x: x.get_due_time())
 
-    def update(self):
+    def update(self) -> None:
         # TODO: Try to be smart and only re-download data that actually changed
         # Not handling exception is intentional: let the client handle it according to application
         self.download()
