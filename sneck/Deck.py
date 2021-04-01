@@ -90,9 +90,9 @@ class DeckAcl:
         # groups. Groups get unrolled within the previous API call into the single participants, therefore ACL
         # principals are not guaranteed to be in the DeckBoard.users dictionary. We remedy this by adding those
         # principals to that dictionary in the event they are not found at ACL creation time.
-        if acl['participant']['primaryKey'] not in users:
-            users[acl['participant']['primaryKey']] = DeckUser(acl['participant'])
-        self.__principal = users[acl['participant']['primaryKey']]
+        if acl['participant']['uid'] not in users:
+            users[acl['participant']['uid']] = DeckUser(acl['participant'])
+        self.__principal = users[acl['participant']['uid']]
 
         # Same as the type for DeckUser
         self.__type = self.__principal.get_type()
@@ -291,8 +291,8 @@ class DeckCard:
                                 dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z').astimezone(tz.utc))
 
         # Users
-        self.__assigned_users = [users[assignee['participant']['primaryKey']] for assignee in card['assignedUsers']]
-        self.__owner = users[card['owner']['primaryKey']]
+        self.__assigned_users = [users[assignee['participant']['uid']] for assignee in card['assignedUsers']]
+        self.__owner = users[card['owner']['uid']]
 
         self.__last_editor = users[card['lastEditor']] if card['lastEditor'] is not None else None
 
@@ -496,11 +496,10 @@ class DeckBoard:
         self.__labels = {label['ETag']: DeckLabel(label) for label in board['labels']}
 
         # Users and access control
-        self.__users = {user['primaryKey']: DeckUser(user) for user in board['users']}
-        self.__owner = self.__users[board['owner']['primaryKey']]
+        self.__users = {user['uid']: DeckUser(user) for user in board['users']}
+        self.__owner = self.__users[board['owner']['uid']]
 
-        # TODO: Make a dictionary
-        self.__acl = [DeckAcl(acl, self.__users) for acl in board['acl']]
+        self.__acl = {acl['participant']['uid']: DeckAcl(acl, self.__users) for acl in board['acl']}
 
         self.__archived = board['archived']  # Board archived by current user
         self.__shared = board['shared']  # Board shared to the current user (not owned by current user)
@@ -593,13 +592,21 @@ class DeckBoard:
     def get_labels(self) -> list[DeckLabel]:
         return [v for k, v in self.__labels.items()]
 
-    # TODO: Expand
     def get_users(self) -> list[DeckUser]:
         return [v for k, v in self.__users.items()]
 
-    # TODO: Implement after makin __acl a dictionary
+    def get_user(self, uid: str = None, name: str = None) -> Optional[DeckUser]:
+        if uid is not None:
+            return self.__users[uid] if uid in self.__users else None
+        elif name is not None:
+            for k, v in self.__users:
+                if k.get_name() == name:
+                    return k
+            return None
+        return None
+
     def get_acl(self, user: DeckUser) -> Optional[DeckAcl]:
-        pass
+        return self.__acl[user.get_id()] if user.get_id() in self.__acl else None
 
     def get_owner(self) -> DeckUser:
         return self.__owner
