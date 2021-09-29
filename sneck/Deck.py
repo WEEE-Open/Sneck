@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import requests
 import os
 import logging
@@ -6,6 +8,7 @@ from typing import Optional, Union
 from requests import ConnectionError, HTTPError, Timeout, TooManyRedirects
 from requests.auth import HTTPBasicAuth
 from datetime import datetime as dt, timezone as tz
+from time import time
 from enum import Enum, unique
 
 from DeckErrors import DeckAPIRequestError as APIError, DeckInvalidInputError as InputError
@@ -65,6 +68,10 @@ class DeckUser:
     def __repr__(self) -> str:
         return self.__uuid
 
+    def update(self, user: dict) -> None:
+        self.__init__(user)
+        print(f'[UPDATE] Updated user {self.__uuid}.')
+
     def get_name(self) -> str:
         return self.__name
 
@@ -76,7 +83,10 @@ class DeckUser:
 
 
 class DeckAcl:
-    def __init__(self, acl: dict, users: dict) -> None:
+    def __init__(self, acl: dict, users: dict) -> None:        
+        # Reference to the list of users of the board
+        self.__users = users
+
         # Internal identifier and type of the ACL
         self.__id = acl['id']
         self.__board_id = acl['boardId']
@@ -99,6 +109,8 @@ class DeckAcl:
 
         # If the user is the owner of the entity
         self.__owner = acl['owner']
+        
+        print(f'[UPDATE] Created ACL {self.__id}.')
 
     def __str__(self) -> str:
         return (str(self.__principal) +
@@ -107,6 +119,10 @@ class DeckAcl:
 
     def __repr__(self) -> str:
         return '.'.join([self.__board_id, self.__id])
+
+    def update(self, acl: dict) -> None:
+        self.__init__(self, acl, self.__users)
+        print(f'[UPDATE] Updated ACL {self.__id}.')
 
     def get_principal(self) -> DeckUser:
         return self.__principal
@@ -141,12 +157,18 @@ class DeckLabel:
         self.__color = label['color']
         self.__last_edited_date = dt.fromtimestamp(label['lastModified']).astimezone(tz.utc)
 
+        print(f'[UPDATE] Created label {self.__id}.')
+
     def __str__(self) -> str:
         return (f'{self.__title} (#{self.__color.upper()} - ' +
                 f'Label #{self.__id}, Board #{self.__board_id}, Last edited on {self.__last_edited_date})')
 
-    def __repr__(self) -> str:
+    def __repr__(self) -> str:DeckAPI
         return self.__tag
+
+    def update(self, label: dict) -> None:
+        self.__init__(label)
+        print(f'[UPDATE] Updated label {self.__id}.')
 
     def get_title(self) -> str:
         return self.__title
@@ -182,6 +204,7 @@ class DeckAttachment:
         self.__card_id = attachment['cardId']
         self.__stack_id = sid
         self.__board_id = bid
+        self.__users_dict = users
 
         # I was not able to clearly understand the intent of this field by looking at Deck's code. It looks to be a
         # metadata storage of sorts, as of now, it only stores the name of the uploaded file
@@ -199,6 +222,8 @@ class DeckAttachment:
         self.__last_edit_time = dt.fromtimestamp(attachment['lastModified']).astimezone(tz.utc)
         self.__deletion_time = (dt.fromtimestamp(attachment['deletedAt']).astimezone(tz.utc)
                                 if attachment['deletedAt'] != 0 else None)
+        
+        print(f'[UPDATE] Created attachment #{self.__id}.')
 
     def __str__(self) -> str:
         result = f'ATTACHMENT "{self.__name["dir"] + "/" + self.__name["name"] + "." + self.__name["ext"]}:"\n'
@@ -210,6 +235,10 @@ class DeckAttachment:
         result += f'    Deleted{"at" + str(self.__deletion_time) if self.__deletion_time else ": No"}\n'
 
         return result
+    
+    def update(self, attachment: dict) -> None:
+        self.__init__(attachment, self.__stack_id, self.__board_id, self.__users_dict)
+        print(f'[UPDATE]: Updated attachment #{self.__id}.')
 
     def __repr__(self) -> str:
         return '.'.join([self.__board_id, self.__stack_id, self.__card_id, self.__id])
@@ -263,10 +292,19 @@ class DeckCard:
         'text': Type.TEXT       # Documentation says this type should not exist, but example cards use it
     }
 
-    def __init__(self, card: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI) -> None:
-        # Internal identifiers for the card
+    # References to the users and labels dictionaries.
+
+    def __init__(self, card: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI, updateAttachments: bool = True) -> None:
+        # IDs of the parents of the card
         self.__board_id = bid
         self.__stack_id = card['stackId']
+
+        # References to the label and user dictionaries and the API.
+        self.__users_dict = users
+        self.__labels_dict = labels
+        self.__api = api
+
+        # Attributes of the card
         self.__id = card['id']
         self.__tag = card['ETag']
         self.__type = self.__types[card['type']]
@@ -275,10 +313,6 @@ class DeckCard:
         self.__description = card['description'].strip()
         self.__labels = [labels[label['ETag']] for label in card['labels']]
         self.__archived = card['archived']
-        self.__attachments = ([DeckAttachment(attachment, self.__stack_id, self.__board_id, users) for attachment in
-                              api.request(f'boards/{bid}/stacks/{self.__stack_id}/cards/{self.__id}/attachments')]
-                              if card['attachmentCount'] > 0 else [])
-
         self.__unread_comments_count = card['commentsUnread']
 
         # Timestamps
@@ -286,18 +320,23 @@ class DeckCard:
         self.__last_edited_time = dt.fromtimestamp(card['lastModified']).astimezone(tz.utc)
         self.__deletion_time = (dt.fromtimestamp(card['deletedAt']).astimezone(tz.utc)
                                 if card['deletedAt'] != 0 else None)
-
         self.__card_due_time = (None if card['duedate'] is None else
                                 dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z').astimezone(tz.utc))
 
         # Users
         self.__assigned_users = [users[assignee['participant']['uid']] for assignee in card['assignedUsers']]
         self.__owner = users[card['owner']['uid']]
-
         self.__last_editor = users[card['lastEditor']] if card['lastEditor'] is not None else None
 
+        # Card attachments
+        self.__attachments = ({attachment['id']: DeckAttachment(attachment, self.__stack_id, self.__board_id, users) for attachment in
+                              api.request(f'boards/{bid}/stacks/{self.__stack_id}/cards/{self.__id}/attachments')}
+                              if card['attachmentCount'] > 0 else {})
+        
+        print(f'[UPDATE] Created card {self.__id}.')
+
     def __str__(self) -> str:
-        result = f'CARD "{self.__title}" (Card #{self.__id}, Stack #{self.__stack_id}, Board #{self.__board_id}):\n'
+        result =  f'CARD "{self.__title}" (Card #{self.__id}, Stack #{self.__stack_id}, Board #{self.__board_id}):\n'
         result += f'    Type: {self.__type}\n'
         result += f'    Description: "{self.get_shortened_description(50)}"\n'
         result += f'    Labels: {", ".join(label.get_title() for label in self.__labels)}\n'
@@ -328,6 +367,30 @@ class DeckCard:
 
     def __repr__(self) -> str:
         return self.__tag
+    
+    def update(self, card: dict) -> None:
+        self.__init__(card, self.__board_id, self.__labels_dict, self.__users_dict, self.__api, updateAttachments=False)
+
+        if card['attachmentCount'] == 0:
+            while len(self.__attachments) != 0:
+                attachment = self.__attachments.popitem()
+                print(f'[UPDATE] Removed attachment {attachment.get_id()} from card {self.__id}.')
+            return
+        
+        attachments = self.__api.request(f'boards/{self.__board_id}/stacks/{self.__stack_id}/cards/{self.__id}/attachments')
+
+        for attachment in attachments:
+            if attachment['id'] not in self.__attachments:
+                self.__attachments[attachment['id']] = DeckAttachment(attachment, self.__stack_id, self.__board_id, users)
+                print(f'[UPDATE] Added attachment {attachment["id"]} to card {self.__id}.')
+            elif attachment['id'] in self.__attachments and self.__attachments[attachment['id']].get_tag() != attachment['ETag']:
+                self.__attachments[attachment['id']].update(attachment)
+                print(f'[UPDATE] Updated attachment {attachment["id"]} of card {self.__id}.')
+            elif attachment['id'] in self.__attachments and attachment['deletedAt'] != 0:
+                self.__attachments.pop(attachment['id'])
+                print(f'[UPDATE] Removed attachment {attachment["id"]} from card {self.__id}.')
+        
+        print(f'[UPDATE]: Updated card {self.__id}.')
 
     def get_title(self) -> str:
         return self.__title
@@ -368,7 +431,7 @@ class DeckCard:
         return self.__assigned_users
 
     def get_attachments(self) -> list[DeckAttachment]:
-        return self.__attachments
+        return self.__attachments.items()
 
     def get_attachment(self, path: str) -> Optional[DeckAttachment]:
         result = [attachment for attachment in self.get_attachments() if attachment.get_full_name() == path]
@@ -407,20 +470,26 @@ class DeckCard:
 
 
 class DeckStack:
-    def __init__(self, stack: dict, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI) -> None:
+    def __init__(self, stack: dict, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI, updateCards: bool = True) -> None:
         # Internal identifiers for the stack
         self.__board_id = stack['boardId']
         self.__id = stack['id']
         self.__tag = stack['ETag']
         self.__order = stack['order']
 
+        self.__labels_dict = labels
+        self.__users_dict = users
+        self.__api = api
+
         self.__last_edited_time = dt.fromtimestamp(stack['lastModified']).astimezone(tz.utc)
         self.__deletion_time = (dt.fromtimestamp(stack['deletedAt']).astimezone(tz.utc)
                                 if stack['deletedAt'] != 0 else None)
 
         self.__title = stack['title']
-        self.__cards = ([DeckCard(card, self.__board_id, labels, users, api) for card in stack['cards']]
-                        if 'cards' in stack else [])
+        self.__cards = ({card['id']: DeckCard(card, self.__board_id, labels, users, api) for card in stack['cards']}
+                        if 'cards' in stack else {})
+        
+        print(f'[UPDATE] Created stack {self.__id}.')
 
     def __str__(self) -> str:
         result = f'STACK "{self.__title}" (Stack #{self.__id}, Board #{self.__board_id}):\n'
@@ -434,6 +503,28 @@ class DeckStack:
 
     def __repr__(self) -> str:
         return self.__tag
+
+    def update(self, stack: dict) -> None:
+        self.__init__(stack, self.__labels_dict, self.__users_dict, self.__api, updateCards=False)
+
+        if 'cards' not in stack:
+            while len(self.__cards) != 0:
+                card = self.__cards.popitem()
+                print(f'Updating stack #{self.__id}: Removing card #{card.get_id()}.')
+            return
+
+        for card in stack['cards']:
+            if card['id'] not in self.__cards:
+                self.__cards[card['id']] = DeckCard(card, self.__labels, self.__users, api)
+                print(f'[UPDATE] Added card #{card["id"]} to stack #{self.__id}.')
+            elif card['id'] in self.__cards and self.__cards[card['id']].get_tag() != card['ETag']:
+                self.__cards[card['id']].update(card)
+                print(f'[UPDATE] Updated card #{card["id"]} of stack #{self.__id}.')
+            elif card['id'] in self.__cards and card['deletedAt'] != 0:
+                self.__cards.pop(card['id'])
+                print(f'[UPDATE] Removed card #{card["id"]} from stack #{self.__id}.')
+        
+        print(f'[UPDATE]: Updated stack {self.__id}.')
 
     def get_title(self) -> str:
         return self.__title
@@ -451,17 +542,16 @@ class DeckStack:
                   assigned: Optional[Union[str, DeckUser]] = None,
                   deleted: Optional[bool] = None) -> list[DeckCard]:
         return sorted(
-            [card for card in self.__cards if (not label or card.has_label(label))
+            [card for card in self.__cards.items() if (not label or card.has_label(label))
              and (not assigned or card.is_assigned(assigned)) and (deleted is None or card.is_deleted() == deleted)],
             key=lambda c: c.get_order())
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
-        return sorted([c for c in self.__cards if c.get_due_time() and (past or c.get_due_time() >= dt.now(tz.utc))],
+        return sorted([c for c in self.__cards.items() if c.get_due_time() and (past or c.get_due_time() >= dt.now(tz.utc))],
                       key=lambda x: x.get_due_time())
 
     def get_card(self, cid: int) -> Optional[DeckCard]:
-        result = [item for item in self.__cards if item.get_id() == cid]
-        return result[0] if len(result) == 1 else None
+        return self.__cards[cid] if cid in self.__cards else None
 
     def get_next_event(self) -> Optional[DeckCard]:
         result = self.get_events()
@@ -487,10 +577,12 @@ class DeckBoard:
         'all': NotificationType.ALL
     }
 
-    def __init__(self, board: dict, api: DeckAPI) -> None:
+    def __init__(self, board: dict, api: DeckAPI, updateStacks: bool = True) -> None:
         # Internal identifiers for the board
         self.__id = board['id']
         self.__tag = board['ETag']
+
+        self.__api = api
 
         # Internal board settings
         self.__permissions = board['permissions']  # Permissions for this user (r,w,share,manage)
@@ -517,8 +609,10 @@ class DeckBoard:
         self.__last_edited_time = (None if board['lastModified'] == 0
                                    else dt.fromtimestamp(board['lastModified']).astimezone(tz.utc))
 
-        self.__stacks = [DeckStack(stack, self.__labels, self.__users, api)
-                         for stack in api.request(f'boards/{self.__id}/stacks')]
+        self.__stacks = {stack['id']: DeckStack(stack, self.__labels, self.__users, api)
+                         for stack in api.request(f'boards/{self.__id}/stacks')}
+        
+        print(f'[UPDATE] Created board {self.__id}.')
 
     def __str__(self) -> str:
         result = f'BOARD "{self.__title}" (Board #{self.__id}):\n'
@@ -555,6 +649,21 @@ class DeckBoard:
 
     def __repr__(self) -> str:
         return self.__tag
+
+    def update(self, board: dict) -> None:
+        board = self.__api.request(f'boards/{self.__id}')
+        self.__init__(board, self.__api, updateStacks=False)
+
+        stacks = api.request(f'boards/{self.__id}/stacks')
+        for stack in board['stacks']:
+            if stack['id'] not in self.__stacks:
+                self.__stacks[stack['id']] = DeckStack(stack, self.__labels, self.__users, api)
+            elif stack['id'] in self.__stacks and self.__stacks[stack['id']].get_tag() != stack['ETag']:
+                self.__stacks[stack['id']].update(stack)
+            elif stack['id'] in self.__stacks and stack['deletedAt'] != 0:
+                self.__stacks.pop(stack['id'])
+        
+        print(f'[UPDATE] Updated board {self.__id}.')
 
     def can_read(self, uid: Optional[str] = None) -> bool:
         if not uid:
@@ -633,12 +742,18 @@ class DeckBoard:
         result = [item for item in self.__stacks if item.get_id() == sid]
         return result[0] if len(result) == 1 else None
 
-    def get_cards(self, label: Optional[Union[str, DeckLabel]] = None,
+    def get_car1586269585ds(self, label: Optional[Union[str, DeckLabel]] = None,
                   assigned: Optional[Union[str, DeckUser]] = None,
                   deleted: Optional[bool] = None) -> list[DeckCard]:
         return sorted(
             [card for stack in self.__stacks for card in stack.get_cards()
-             if (not label or card.has_label(label)) and (not assigned or card.is_assigned(assigned))
+             if (not label or card.has_label(label)) and (not assigned or card
+            if board['id'] not in self.__boards:
+                self.__boards[board['id']] = DeckBoard(board, self.__api)
+            elif board['id'] in self.__boards and self.__boards[board['id']].get_tag() != board['ETag']:
+                self.__boards[board['id']].update()
+            elif board['id'] in self.__boards and board['deletedAt'] != 0:
+                self.__boards.pop(board['id']).is_assigned(assigned))
              and (deleted is None or card.is_deleted() == deleted)], key=lambda c: c.get_oder())
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
@@ -676,18 +791,20 @@ class Deck:
     def __str__(self) -> str:
         return '\n\n'.join([str(board) for board in self.__boards.values()])
 
-    def download(self) -> None:
+    def update(self) -> None:
         # Not handling exception is intentional: let the client handle it according to application
         boards = self.__api.request('boards?details=1')
 
-        self.__boards = {b['ETag']: DeckBoard(b, self.__api) for b in boards if b['deletedAt'] == 0}
+        for board in boards:
+            if board['id'] not in self.__boards:
+                self.__boards[board['id']] = DeckBoard(board, self.__api)
+            elif board['id'] in self.__boards and self.__boards[board['id']].get_tag() != board['ETag']:
+                self.__boards[board['id']].update()
+            elif board['id'] in self.__boards and board['deletedAt'] != 0:
+                self.__boards.pop(board['id'])
+        
         self.__events = sorted([e for ls in [v.get_events(past=True) for k, v in self.__boards.items()] for e in ls],
                                key=lambda x: x.get_due_time())
-
-    def update(self) -> None:
-        # TODO: Try to be smart and only re-download data that actually changed
-        # Not handling exception is intentional: let the client handle it according to application
-        self.download()
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
         return [e for e in self.__events if past or e.get_due_time >= dt.now(tz.utc)]
@@ -731,6 +848,9 @@ class Deck:
                     return k
             return None
         return None
+    
+    def request(self, endpoint: str) -> Optional[Union[list, dict]]:
+        return self.__api.request(endpoint)
 
 
 # Test basic program functionality
@@ -742,3 +862,7 @@ if __name__ == '__main__':
 
     deck = Deck(deck_hostname, deck_username, deck_password, deck_security)
     print(deck)
+
+    while True:
+        endpoint = input('> ')
+        print(deck.request(endpoint))
