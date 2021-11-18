@@ -163,7 +163,7 @@ class DeckLabel:
         return (f'{self.__title} (#{self.__color.upper()} - ' +
                 f'Label #{self.__id}, Board #{self.__board_id}, Last edited on {self.__last_edited_date})')
 
-    def __repr__(self) -> str:DeckAPI
+    def __repr__(self) -> str:
         return self.__tag
 
     def update(self, label: dict) -> None:
@@ -742,18 +742,12 @@ class DeckBoard:
         result = [item for item in self.__stacks if item.get_id() == sid]
         return result[0] if len(result) == 1 else None
 
-    def get_car1586269585ds(self, label: Optional[Union[str, DeckLabel]] = None,
+    def get_cards(self, label: Optional[Union[str, DeckLabel]] = None,
                   assigned: Optional[Union[str, DeckUser]] = None,
                   deleted: Optional[bool] = None) -> list[DeckCard]:
         return sorted(
             [card for stack in self.__stacks for card in stack.get_cards()
-             if (not label or card.has_label(label)) and (not assigned or card
-            if board['id'] not in self.__boards:
-                self.__boards[board['id']] = DeckBoard(board, self.__api)
-            elif board['id'] in self.__boards and self.__boards[board['id']].get_tag() != board['ETag']:
-                self.__boards[board['id']].update()
-            elif board['id'] in self.__boards and board['deletedAt'] != 0:
-                self.__boards.pop(board['id']).is_assigned(assigned))
+             if (not label or card.has_label(label)) and (not assigned or card.is_assigned(assigned))
              and (deleted is None or card.is_deleted() == deleted)], key=lambda c: c.get_oder())
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
@@ -786,7 +780,7 @@ class Deck:
         self.__boards = {}
         self.__users = {}
 
-        self.download()
+        self.update()
 
     def __str__(self) -> str:
         return '\n\n'.join([str(board) for board in self.__boards.values()])
