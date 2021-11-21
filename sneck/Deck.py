@@ -549,7 +549,7 @@ class DeckStack:
             key=lambda c: c.get_order())
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
-        return sorted([c for c in self.__cards.items() if c.get_due_time() and (past or c.get_due_time() >= dt.now(tz.utc))],
+        return sorted([c for c in self.__cards.values() if c.get_due_time() and (past or c.get_due_time() >= dt.now(tz.utc))],
                       key=lambda x: x.get_due_time())
 
     def get_card(self, cid: int) -> Optional[DeckCard]:
