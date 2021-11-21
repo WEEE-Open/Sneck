@@ -611,10 +611,6 @@ class DeckBoard:
         self.__last_edited_time = (None if board['lastModified'] == 0
                                    else dt.fromtimestamp(board['lastModified']).astimezone(tz.utc))
 
-        #WHY IS STACK AN INTEGER???
-        for stack in api.request(f'boards/21/stacks'):
-            print(type(stack))
-            print(stack)
         self.__stacks = {stack['id']: DeckStack(stack, self.__labels, self.__users, api)
                          for stack in api.request(f'boards/{self.__id}/stacks')}
         
@@ -757,10 +753,7 @@ class DeckBoard:
              and (deleted is None or card.is_deleted() == deleted)], key=lambda c: c.get_oder())
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
-        #WHY IS STACK AN INTEGER???
-        for stack in self.__stacks:
-            print(type(stack))
-        return sorted([c for events in [stack.get_events(past=past) for stack in self.__stacks] for c in events
+        return sorted([c for events in [stack.get_events(past=past) for stack in self.__stacks.values()] for c in events
                        if c.get_due_time() and (past or c.get_due_time() >= dt.now(tz.utc))],
                       key=lambda x: x.get_due_time())
 
