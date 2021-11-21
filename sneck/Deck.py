@@ -23,6 +23,7 @@ class DeckAPI:
     def request(self, binding: str) -> Optional[Union[list, dict]]:
         logging.debug(f'Making request {self.__api_base + binding}...')
         try:
+            print(f'Requesting: {self.__api_base}{binding}')
             response = requests.get(self.__api_base + binding,
                                     headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
                                     auth=HTTPBasicAuth(self.__username, self.__password))
@@ -39,7 +40,8 @@ class DeckAPI:
         # Check if the status code is an error or if the return type is not json data in case we screw up
         if not response.ok or 'application/json' not in response.headers['Content-Type']:
             raise APIError(APIError.Reason.RESPONSE, response.status_code, f'Server error while processing response')
-
+        
+        print(f'Request succesful, response: {response.status_code}')
         return response.json()
 
 
@@ -609,6 +611,10 @@ class DeckBoard:
         self.__last_edited_time = (None if board['lastModified'] == 0
                                    else dt.fromtimestamp(board['lastModified']).astimezone(tz.utc))
 
+        #WHY IS STACK AN INTEGER???
+        for stack in api.request(f'boards/21/stacks'):
+            print(type(stack))
+            print(stack)
         self.__stacks = {stack['id']: DeckStack(stack, self.__labels, self.__users, api)
                          for stack in api.request(f'boards/{self.__id}/stacks')}
         
@@ -751,6 +757,9 @@ class DeckBoard:
              and (deleted is None or card.is_deleted() == deleted)], key=lambda c: c.get_oder())
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
+        #WHY IS STACK AN INTEGER???
+        for stack in self.__stacks:
+            print(type(stack))
         return sorted([c for events in [stack.get_events(past=past) for stack in self.__stacks] for c in events
                        if c.get_due_time() and (past or c.get_due_time() >= dt.now(tz.utc))],
                       key=lambda x: x.get_due_time())
