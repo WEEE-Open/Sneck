@@ -85,6 +85,18 @@ class DeckUser:
 
 
 class DeckAcl:
+    @unique
+    class Type(Enum):
+        USER = 0
+        GROUP = 1
+        CIRCLE = 7
+
+    __types = {
+        '0': Type.USER,
+        '1': Type.GROUP,
+        '7': Type.CIRCLE
+    }
+
     def __init__(self, acl: dict, users: dict) -> None:        
         # Reference to the list of users of the board
         self.__users = users
@@ -107,7 +119,8 @@ class DeckAcl:
         self.__principal = users[acl['participant']['uid']]
 
         # Same as the type for DeckUser
-        self.__type = self.__principal.get_type()
+        #self.__type = self.__principal.get_type()
+        self.__type = self.__types[str(acl['type'])]
 
         # If the user is the owner of the entity
         self.__owner = acl['owner']
@@ -128,6 +141,9 @@ class DeckAcl:
 
     def get_principal(self) -> DeckUser:
         return self.__principal
+
+    def get_type(self) -> Type:
+        return self.__type
 
     def can_edit(self) -> bool:
         return self.__permissions['edit']
@@ -316,6 +332,7 @@ class DeckCard:
         self.__labels = [labels[label['ETag']] for label in card['labels']]
         self.__archived = card['archived']
         self.__unread_comments_count = card['commentsUnread']
+        self.__overdue = card['overdue']
 
         # Timestamps
         self.__creation_time = dt.fromtimestamp(card['createdAt']).astimezone(tz.utc)
@@ -463,6 +480,9 @@ class DeckCard:
 
     def is_deleted(self) -> bool:
         return self.__deletion_time is not None
+
+    def is_overdue(self) -> bool:
+        return self.__overdue == 1
 
     def get_id(self) -> int:
         return self.__id
