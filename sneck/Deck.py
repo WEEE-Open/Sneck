@@ -3,6 +3,7 @@
 import requests
 import os
 import logging
+import json
 
 from typing import Optional, Union
 from requests import ConnectionError, HTTPError, Timeout, TooManyRedirects
@@ -44,6 +45,73 @@ class DeckAPI:
         print(f'Request succesful, response: {response.status_code}')
         return response.json()
 
+    def post(self, binding: str, payload: dict) -> Optional[Union[list, dict]]:
+        try:
+            print(f'Requesting [POST]: {self.__api_base}{binding}')
+            response = requests.post(self.__api_base + binding, data=json.dumps(payload),
+                                    headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
+                                    auth=HTTPBasicAuth(self.__username, self.__password))
+        except ConnectionError:
+            raise APIError(APIError.Reason.CONNECTION, 0, 'Connection error.')
+        except HTTPError:
+            raise APIError(APIError.Reason.RESPONSE, 0, 'Invalid HTTP response')
+        except Timeout:
+            raise APIError(APIError.Reason.TIMEOUT, 0, 'Timeout during connection')
+        except TooManyRedirects:
+            APIError(APIError.Reason.RESPONSE, 0, 'Too many redirects')
+            return None
+
+        # Check if the status code is an error or if the return type is not json data in case we screw up
+        if not response.ok or 'application/json' not in response.headers['Content-Type']:
+            raise APIError(APIError.Reason.RESPONSE, response.status_code, f'Server error while processing response')
+
+        print(f'Request succesful, response: {response.status_code}')
+        return response.json()
+
+    def put(self, binding: str, payload: dict) -> None:
+        try:
+            print(f'Requesting [PUT]: {self.__api_base}{binding}')
+            response = requests.put(self.__api_base + binding, data=json.dumps(payload),
+                                    headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
+                                    auth=HTTPBasicAuth(self.__username, self.__password))
+        except ConnectionError:
+            raise APIError(APIError.Reason.CONNECTION, 0, 'Connection error.')
+        except HTTPError:
+            raise APIError(APIError.Reason.RESPONSE, 0, 'Invalid HTTP response')
+        except Timeout:
+            raise APIError(APIError.Reason.TIMEOUT, 0, 'Timeout during connection')
+        except TooManyRedirects:
+            APIError(APIError.Reason.RESPONSE, 0, 'Too many redirects')
+            return None
+
+        # Check if the status code is an error or if the return type is not json data in case we screw up
+        if not response.ok or 'application/json' not in response.headers['Content-Type']:
+            raise APIError(APIError.Reason.RESPONSE, response.status_code, f'Server error while processing response')
+
+        print(f'Request succesful, response: {response.status_code}')
+    
+    def delete(self, binding: str) -> None:
+        try:
+            print(f'Requesting [DELETE]: {self.__api_base}{binding}')
+            response = requests.delete(self.__api_base + binding,
+                                        headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
+                                        auth=HTTPBasicAuth(self.__username, self.__password))
+        except ConnectionError:
+            raise APIError(APIError.Reason.CONNECTION, 0, 'Connection error.')
+        except HTTPError:
+            raise APIError(APIError.Reason.RESPONSE, 0, 'Invalid HTTP response')
+        except Timeout:
+            raise APIError(APIError.Reason.TIMEOUT, 0, 'Timeout during connection')
+        except TooManyRedirects:
+            APIError(APIError.Reason.RESPONSE, 0, 'Too many redirects')
+            return None
+
+        # Check if the status code is an error or if the return type is not json data in case we screw up
+        if not response.ok or 'application/json' not in response.headers['Content-Type']:
+            raise APIError(APIError.Reason.RESPONSE, response.status_code, f'Server error while processing response')
+        
+        print(f'Request succesful, response: {response.status_code}')
+        
 
 class DeckUser:
     @unique
@@ -867,6 +935,15 @@ class Deck:
     
     def request(self, endpoint: str) -> Optional[Union[list, dict]]:
         return self.__api.request(endpoint)
+    
+    def post(self, endpoint: str, payload: dict) -> Optional[Union[list, dict]]:
+        return self.__api.post(endpoint, payload)
+    
+    def put(self, endpoint: str, payload: dict) -> None:
+        self.__api.put(endpoint, payload)
+
+    def delete(self, endpoint: str) -> None:
+        self.__api.delete(endpoint)
 
 
 # Test basic program functionality
@@ -880,5 +957,38 @@ if __name__ == '__main__':
     print(deck)
 
     while True:
+        while True:
+            try:
+                oper = int(input('Choose operation:\n(1)get\n(2)post\n(3)put\n(4)delete\n: '))
+                if oper >= 1 and oper <= 4:
+                    break
+                else:
+                    print(f'Try again')
+            except KeyboardInterrupt:
+                exit(1)
+            except:
+                print(f'Try again')
+            
         endpoint = input('> ')
-        print(deck.request(endpoint))
+
+        if oper == 1:
+            print(deck.request(endpoint))
+        elif oper == 2:
+            #only adding a card
+            card_title = input('title: ')
+            card_type = input('type: ')
+            card_order = int(input('order: '))
+            card_description = input('description: ')
+            payload_dict = {'title': card_title, 'type': card_type, 'order': card_order, 'description': card_description}
+            print(deck.post(endpoint, payload_dict))
+        elif oper == 3:
+            #not working yet
+            card_title = input('title: ')
+            card_type = input('type: ')
+            card_order = int(input('order: '))
+            card_description = input('description: ')
+            payload_dict = {'title': card_title, 'type': card_type, 'order': card_order, 'description': card_description, 'duedate': "2019-12-24T19:29:30+00:00"}
+            deck.put(endpoint, payload_dict)
+        elif oper == 4:
+            deck.delete(endpoint)
+        
