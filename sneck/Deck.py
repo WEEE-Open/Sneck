@@ -40,6 +40,7 @@ class DeckAPI:
 
         # Check if the status code is an error or if the return type is not json data in case we screw up
         if not response.ok or 'application/json' not in response.headers['Content-Type']:
+            print(response.json())
             raise APIError(APIError.Reason.RESPONSE, response.status_code, f'Server error while processing response')
         
         print(f'Request succesful, response: {response.status_code}')
@@ -63,14 +64,18 @@ class DeckAPI:
 
         # Check if the status code is an error or if the return type is not json data in case we screw up
         if not response.ok or 'application/json' not in response.headers['Content-Type']:
+            print(response.json())
             raise APIError(APIError.Reason.RESPONSE, response.status_code, f'Server error while processing response')
 
         print(f'Request succesful, response: {response.status_code}')
         return response.json()
 
+    # Getting an Internal Server Error when using PUT
     def put(self, binding: str, payload: dict) -> None:
         try:
             print(f'Requesting [PUT]: {self.__api_base}{binding}')
+            # Must provide an owner inside the payload
+            # The owner has to be a dictionary and provide all the info required (namely the uid)
             response = requests.put(self.__api_base + binding, data=json.dumps(payload),
                                     headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
                                     auth=HTTPBasicAuth(self.__username, self.__password))
@@ -86,6 +91,7 @@ class DeckAPI:
 
         # Check if the status code is an error or if the return type is not json data in case we screw up
         if not response.ok or 'application/json' not in response.headers['Content-Type']:
+            print(response.json())
             raise APIError(APIError.Reason.RESPONSE, response.status_code, f'Server error while processing response')
 
         print(f'Request succesful, response: {response.status_code}')
@@ -108,6 +114,7 @@ class DeckAPI:
 
         # Check if the status code is an error or if the return type is not json data in case we screw up
         if not response.ok or 'application/json' not in response.headers['Content-Type']:
+            print(response.json())
             raise APIError(APIError.Reason.RESPONSE, response.status_code, f'Server error while processing response')
         
         print(f'Request succesful, response: {response.status_code}')
@@ -379,7 +386,6 @@ class DeckCard:
     }
 
     # References to the users and labels dictionaries.
-
     def __init__(self, card: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI, updateAttachments: bool = True) -> None:
         # IDs of the parents of the card
         self.__board_id = bid
@@ -397,7 +403,8 @@ class DeckCard:
         self.__order = card['order']
         self.__title = card['title']
         self.__description = card['description'].strip()
-        self.__labels = [labels[label['ETag']] for label in card['labels']]
+        self.__labels = (None if card['labels'] is None else 
+                        [labels[label['ETag']] for label in card['labels']])
         self.__archived = card['archived']
         self.__unread_comments_count = card['commentsUnread']
         self.__overdue = card['overdue']
@@ -411,14 +418,16 @@ class DeckCard:
                                 dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z').astimezone(tz.utc))
 
         # Users
-        self.__assigned_users = [users[assignee['participant']['uid']] for assignee in card['assignedUsers']]
-        self.__owner = users[card['owner']['uid']]
+        self.__assigned_users = (None if card['assignedUsers'] is None else 
+                                [users[assignee['participant']['uid']] for assignee in card['assignedUsers']])
+        self.__owner = (users[card['owner']['uid']] if isinstance(card['owner'], dict) else
+                        users[card['owner']])
         self.__last_editor = users[card['lastEditor']] if card['lastEditor'] is not None else None
 
         # Card attachments
         self.__attachments = ({attachment['id']: DeckAttachment(attachment, self.__stack_id, self.__board_id, users) for attachment in
                               api.request(f'boards/{bid}/stacks/{self.__stack_id}/cards/{self.__id}/attachments')}
-                              if card['attachmentCount'] > 0 else {})
+                              if card['attachmentCount'] is not None and card['attachmentCount'] > 0 else {})
         
         print(f'[UPDATE] Created card {self.__id}.')
 
@@ -616,6 +625,10 @@ class DeckStack:
         
         print(f'[UPDATE]: Updated stack {self.__id}.')
 
+    def add_card(self, payload: dict):
+        new_card = self.__api.post(f'boards/{self.__board_id}/stacks/{self.__id}/cards', payload)
+        self.__cards[new_card['id']] = DeckCard(new_card, self.__board_id, self.__labels_dict, self.__users_dict, self.__api, True)
+
     def get_title(self) -> str:
         return self.__title
 
@@ -634,7 +647,7 @@ class DeckStack:
         return sorted(
             [card for card in self.__cards.items() if (not label or card.has_label(label))
              and (not assigned or card.is_assigned(assigned)) and (deleted is None or card.is_deleted() == deleted)],
-            key=lambda c: c.get_order())
+            key=lambda c: c[1].get_order())
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
         return sorted([c for c in self.__cards.values() if c.get_due_time() and (past or c.get_due_time() >= dt.now(tz.utc))],
@@ -829,7 +842,7 @@ class DeckBoard:
         return sorted(self.__stacks, key=lambda s: s.get_order())
 
     def get_stack(self, sid: int) -> Optional[DeckStack]:
-        result = [item for item in self.__stacks if item.get_id() == sid]
+        result = [item for item in self.__stacks.values() if item.get_id() == sid]
         return result[0] if len(result) == 1 else None
 
     def get_cards(self, label: Optional[Union[str, DeckLabel]] = None,
@@ -889,6 +902,9 @@ class Deck:
         
         self.__events = sorted([e for ls in [v.get_events(past=True) for k, v in self.__boards.items()] for e in ls],
                                key=lambda x: x.get_due_time())
+    
+    def add_card(self, bid: int, sid: int, payload: dict) -> None:
+        self.get_board(bid).get_stack(sid).add_card(payload)
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
         return [e for e in self.__events if past or e.get_due_time >= dt.now(tz.utc)]
@@ -915,7 +931,7 @@ class Deck:
         return [v for k, v in self.__boards]
 
     def get_board(self, bid: int) -> Optional[DeckBoard]:
-        for board in self.__boards:
+        for board in self.__boards.values():
             if board.get_id() == bid:
                 return board
         return None
@@ -946,6 +962,43 @@ class Deck:
         self.__api.delete(endpoint)
 
 
+def testApi(deck: Deck):
+    while True:
+        while True:
+            try:
+                oper = int(input('\nChoose operation:\n(1)get\n(2)post\n(3)put\n(4)delete\n: '))
+                if oper >= 1 and oper <= 4:
+                    break
+                else:
+                    print(f'Try again')
+            except KeyboardInterrupt:
+                print()
+                exit(1)
+            except:
+                print(f'Try again')
+            
+        endpoint = input('> ')
+
+        if oper == 1:
+            print(deck.request(endpoint))
+        elif oper == 2:
+            card_title = input('title: ')
+            card_type = input('type: ')
+            card_order = int(input('order: '))
+            card_description = input('description: ')
+            payload_dict = {'title': card_title, 'type': card_type, 'order': card_order, 'description': card_description}
+            print(deck.post(endpoint, payload_dict))
+        elif oper == 3:
+            card_title = input('title: ')
+            card_type = input('type: ')
+            card_order = int(input('order(int): '))
+            card_description = input('description: ')
+            payload_dict = {'title': card_title, 'type': card_type, 'order': card_order, 'description': card_description, 
+            'duedate': dt.now(tz.utc).isoformat(), 'owner': {'uid': "omgrly"}}
+            deck.put(endpoint, payload_dict)
+        elif oper == 4:
+            deck.delete(endpoint)
+
 # Test basic program functionality
 if __name__ == '__main__':
     deck_hostname = os.environ.get("OC_DECK_HOST")
@@ -956,39 +1009,8 @@ if __name__ == '__main__':
     deck = Deck(deck_hostname, deck_username, deck_password, deck_security)
     print(deck)
 
-    while True:
-        while True:
-            try:
-                oper = int(input('Choose operation:\n(1)get\n(2)post\n(3)put\n(4)delete\n: '))
-                if oper >= 1 and oper <= 4:
-                    break
-                else:
-                    print(f'Try again')
-            except KeyboardInterrupt:
-                exit(1)
-            except:
-                print(f'Try again')
-            
-        endpoint = input('> ')
+    deck.add_card(1, 1, {'title': "testing_func", 'type': "plain", 'order': 999, 'description': "card_description", 'labels': None,
+                         'owner': {'uid': "omgrly"}, 'attachmentCount': 0})
+    print(deck.get_board(1).get_stack(1).get_cards())
 
-        if oper == 1:
-            print(deck.request(endpoint))
-        elif oper == 2:
-            #only adding a card
-            card_title = input('title: ')
-            card_type = input('type: ')
-            card_order = int(input('order: '))
-            card_description = input('description: ')
-            payload_dict = {'title': card_title, 'type': card_type, 'order': card_order, 'description': card_description}
-            print(deck.post(endpoint, payload_dict))
-        elif oper == 3:
-            #not working yet
-            card_title = input('title: ')
-            card_type = input('type: ')
-            card_order = int(input('order: '))
-            card_description = input('description: ')
-            payload_dict = {'title': card_title, 'type': card_type, 'order': card_order, 'description': card_description, 'duedate': "2019-12-24T19:29:30+00:00"}
-            deck.put(endpoint, payload_dict)
-        elif oper == 4:
-            deck.delete(endpoint)
-        
+    testApi(deck)
