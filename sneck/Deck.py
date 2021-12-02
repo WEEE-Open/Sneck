@@ -149,6 +149,9 @@ class DeckUser:
         self.__init__(user)
         print(f'[UPDATE] Updated user {self.__uuid}.')
 
+    def serialize(self) -> dict:
+        return {'uid': self.__uuid, 'type': self.__type, 'displayname': self.__name}
+
     def get_name(self) -> str:
         return self.__name
 
@@ -262,6 +265,10 @@ class DeckLabel:
     def update(self, label: dict) -> None:
         self.__init__(label)
         print(f'[UPDATE] Updated label {self.__id}.')
+
+    def serialize(self) -> dict:
+        return {'boardId': self.__board_id, 'id': self.__id, 'ETag': self.__tag, 'title': self.__title, 'color': self.__color,
+                'lastModified': dt.timestamp(self.__last_edited_date)}
 
     def get_title(self) -> str:
         return self.__title
@@ -386,8 +393,35 @@ class DeckCard:
     }
 
     # References to the users and labels dictionaries.
-    def __init__(self, card: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI, updateAttachments: bool = True) -> None:
-        if card is not None and bid is not None and labels is not None and users is not None:
+    def __init__(self, card: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI, updateAttachments: bool = True,
+                newCard: bool = False) -> None:
+        if newCard:
+            # Set everything to None except the API (this might not be an optimal or a clean solution)
+            self.__api = api
+            self.__board_id = None
+            self.__stack_id = None
+            self.__users_dict = None
+            self.__labels_dict = None
+            self.__id = None
+            self.__tag = None
+            self.__type = None
+            self.__order = None
+            self.__title = None
+            self.__description = None
+            self.__labels = None
+            self.__archived = None
+            self.__unread_comments_count = None
+            self.__overdue = None
+            self.__creation_time = None
+            self.__last_edited_time = None
+            self.__deletion_time = None
+            self.__card_due_time = None
+            self.__assigned_users = None
+            self.__owner = None
+            self.__last_editor = None
+            self.__attachment_count = None
+            self.__attachments = None
+        elif card is not None and bid is not None and labels is not None and users is not None:
             # IDs of the parents of the card
             self.__board_id = bid
             self.__stack_id = card['stackId']
@@ -414,7 +448,7 @@ class DeckCard:
             self.__creation_time = dt.fromtimestamp(card['createdAt']).astimezone(tz.utc)
             self.__last_edited_time = dt.fromtimestamp(card['lastModified']).astimezone(tz.utc)
             self.__deletion_time = (dt.fromtimestamp(card['deletedAt']).astimezone(tz.utc)
-                                    if card['deletedAt'] != 0 else None)
+                                    if card['deletedAt'] is not None and card['deletedAt'] != 0 else None)
             self.__card_due_time = (None if card['duedate'] is None else
                                     dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z').astimezone(tz.utc))
 
@@ -432,39 +466,13 @@ class DeckCard:
                                 if self.__attachment_count is not None and self.__attachment_count > 0 else {})
                                 
             print(f'[UPDATE] Created card {self.__id}.')
-        else:
-            # Set everything to None except the API (this might not be an optimal or a clean solution)
-            self.__api = api
-            self.__board_id = None
-            self.__stack_id = None
-            self.__users_dict = None
-            self.__labels_dict = None
-            self.__id = None
-            self.__tag = None
-            self.__type = None
-            self.__order = None
-            self.__title = None
-            self.__description = None
-            self.__labels = None
-            self.__archived = None
-            self.__unread_comments_count = None
-            self.__overdue = None
-            self.__creation_time = None
-            self.__last_edited_time = None
-            self.__deletion_time = None
-            self.__card_due_time = None
-            self.__assigned_users = None
-            self.__owner = None
-            self.__last_editor = None
-            self.__attachment_count = None
-            self.__attachments = None
 
     def __str__(self) -> str:
         result =  f'CARD "{self.__title}" (Card #{self.__id}, Stack #{self.__stack_id}, Board #{self.__board_id}):\n'
         result += f'    Type: {self.__type}\n'
         result += f'    Description: "{self.get_shortened_description(50)}"\n'
-        result += f'    Labels: {", ".join(label.get_title() for label in self.__labels)}\n'
-        result += f'    Attachments: {"None" if len(self.__attachments) == 0 else len(self.__attachments)}\n'
+        result += f'    Labels: {"None" if self.__labels is None else ", ".join(label.get_title() for label in self.__labels)}\n'
+        result += f'    Attachments: {"None" if self.__attachments is None or len(self.__attachments) == 0 else len(self.__attachments)}\n'
         result += f'    Archived: {"Yes" if self.__archived else "No"}\n'
         result += f'    Due date: {self.__card_due_time if self.__card_due_time else "None"}\n'
         result += f'    Order: {self.__order}\n'
@@ -477,7 +485,7 @@ class DeckCard:
 
         result += (' '*4 + 'LABELS:\n' + ' '*8 +
                    '\n        '.join([e for i in self.__labels for e in str(i).splitlines()]) +
-                   '\n' if len(self.__labels) > 0 else '')
+                   '\n' if self.__labels is not None and len(self.__labels) > 0 else '')
 
         result += (' '*4 + 'ASSIGNED USERS:\n' + ' '*8 +
                    '\n        '.join([e for i in self.__assigned_users for e in str(i).splitlines()]) +
@@ -485,7 +493,7 @@ class DeckCard:
 
         result += (' '*4 + 'ATTACHMENTS:\n' + ' '*8 +
                    '\n        '.join([e for i in self.__attachments for e in str(i).splitlines()]) +
-                   '\n' if len(self.__attachments) > 0 else '')
+                   '\n' if self.__attachments is not None and len(self.__attachments) > 0 else '')
 
         return result
 
@@ -516,8 +524,19 @@ class DeckCard:
         
         print(f'[UPDATE]: Updated card {self.__id}.')
 
-    def serialize(self) -> dict:
-        return {'title': self.__title, 'type': "plain" if self.__type == 0 else "text", 'order': self.__order, 'description': self.__description,
+    def serialize(self, complete: bool = False) -> dict:
+        if(complete):
+            return {'title': self.__title, 'type': "plain" if self.__type == 0 else "text", 'order': self.__order, 'description': self.__description,
+                    'duedate': self.__card_due_time, 'boardId': self.__board_id, 'stackId': self.__stack_id, 'id': self.__id, 'ETag': self.__tag, 
+                    'labels': [label.serialize() for label in self.__labels], 'archived': self.__archived, 
+                    'commentsUnread': self.__unread_comments_count, 'overdue': self.__overdue, 'createdAt': dt.timestamp(self.__creation_time), 
+                    'lastModified': dt.timestamp(self.__last_edited_time), 
+                    'deletedAt': None if self.__deletion_time is None else dt.timestamp(self.__deletion_time), 
+                    'duedate': None if self.__card_due_time is None else self.__card_due_time.strftime('%Y-%m-%dT%H:%M:%S%z'), 
+                    'assignedUsers': self.__assigned_users, 'owner': self.__owner.serialize(), 'lastEditor': self.__last_editor, 
+                    'attachmentCount': self.__attachment_count, 'attachments': self.__attachments}
+        else:
+            return {'title': self.__title, 'type': "plain" if self.__type == 0 else "text", 'order': self.__order, 'description': self.__description,
                 'duedate': self.__card_due_time}
 
     def set_board_id(self, bid: int) -> None:
@@ -690,10 +709,10 @@ class DeckStack:
 
         self.__last_edited_time = dt.fromtimestamp(stack['lastModified']).astimezone(tz.utc)
         self.__deletion_time = (dt.fromtimestamp(stack['deletedAt']).astimezone(tz.utc)
-                                if stack['deletedAt'] != 0 else None)
+                                if stack['deletedAt'] is not None and stack['deletedAt'] != 0 else None)
 
         self.__title = stack['title']
-        self.__cards = ({card['id']: DeckCard(card, self.__board_id, labels, users, api) for card in stack['cards']}
+        self.__cards = ({card['id']: DeckCard(card, self.__board_id, labels, users, api) for card in stack['cards'] if card is dict}
                         if 'cards' in stack else {})
         
         print(f'[UPDATE] Created stack {self.__id}.')
@@ -722,47 +741,36 @@ class DeckStack:
 
         for card in stack['cards']:
             if card['id'] not in self.__cards:
-                self.__cards[card['id']] = DeckCard(card, self.__labels, self.__users, api)
+                self.__cards[card['id']] = DeckCard(card, self.__board_id, self.__labels_dict, self.__users_dict, self.__api)
                 print(f'[UPDATE] Added card #{card["id"]} to stack #{self.__id}.')
             elif card['id'] in self.__cards and self.__cards[card['id']].get_tag() != card['ETag']:
                 self.__cards[card['id']].update(card)
                 print(f'[UPDATE] Updated card #{card["id"]} of stack #{self.__id}.')
-            elif card['id'] in self.__cards and card['deletedAt'] != 0:
+            elif card['id'] in self.__cards and card['deletedAt'] is not None and card['deletedAt'] != 0:
                 self.__cards.pop(card['id'])
                 print(f'[UPDATE] Removed card #{card["id"]} from stack #{self.__id}.')
         
-        print(f'[UPDATE]: Updated stack {self.__id}.')
+        print(f'[UPDATE] Updated stack {self.__id}.')
 
-    def add_card(self, card: DeckCard) -> None:
+    def serialize(self, complete: bool = False) -> dict:
+        result = {'boardId': self.__board_id, 'id': self.__id, 'ETag': self.__tag, 'order': self.__order, 
+                'lastModified': dt.timestamp(self.__last_edited_time),
+                'deletedAt': self.__deletion_time, 'title': self.__title, 'cards': [c for c in self.__cards.values()]}
+
+        if complete:
+            result | {}
+
+        return result
+
+    def add_card(self, card: DeckCard) -> DeckCard:
         new_card = self.__api.post(f'boards/{self.__board_id}/stacks/{self.__id}/cards', card.serialize())
-        #self.__tag = card['ETag']
+        
+        self.__cards[new_card['id']] = new_card
+        self.update(self.serialize())
 
-        # Order is important!
-        card.set_id(new_card['id'])
-        card.set_board_id(self.__board_id)
-        card.set_stack_id(self.__id)
-        # Passing on the label and user dictionaries
-        card.set_labels_dict(self.__labels_dict)
-        card.set_users_dict(self.__users_dict)
+        print('[UPDATE] Created card {0}.'.format(new_card['id']))
 
-        card.set_labels(new_card['labels'])
-        card.set_assigned_users(new_card['assignedUsers'])
-        card.set_attachment_count(new_card['attachmentCount'])
-        card.set_attachments(new_card['attachments'])
-
-        card.set_creation_time(new_card['createdAt'])
-        card.set_last_edited_time(new_card['lastModified'])
-        card.set_deletion_time(new_card['deletedAt'])
-        card.set_card_due_time(new_card['duedate'])
-
-        card.set_owner(new_card['owner'])
-        card.set_archived(new_card['archived'])
-        card.set_unread_comments_count(new_card['commentsUnread'])
-        card.set_overdue(new_card['overdue'])
-
-        self.__cards[card.get_id()] = card
-
-        print(f'[UPDATE] Created card {card.get_id()}.')
+        return self.get_card(new_card['id'])
 
     def get_title(self) -> str:
         return self.__title
@@ -903,8 +911,8 @@ class DeckBoard:
         
         print(f'[UPDATE] Updated board {self.__id}.')
 
-    def add_card(self, sid: int, card: DeckCard) -> None:
-        self.get_stack(sid).add_card(card)
+    def add_card(self, sid: int, card: DeckCard) -> DeckCard:
+        return self.get_stack(sid).add_card(card)
 
     def can_read(self, uid: Optional[str] = None) -> bool:
         if not uid:
@@ -1042,10 +1050,10 @@ class Deck:
                                key=lambda x: x.get_due_time())
     
     def new_card(self) -> DeckCard:
-        return DeckCard(None, None, None, None, self.__api, False)
+        return DeckCard(None, None, None, None, self.__api, False, True)
 
-    def add_card(self, bid: int, sid: int, card: DeckCard) -> None:
-        self.get_board(bid).add_card(sid, card)
+    def add_card(self, bid: int, sid: int, card: DeckCard) -> DeckCard:
+        return self.get_board(bid).add_card(sid, card)
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
         return [e for e in self.__events if past or e.get_due_time >= dt.now(tz.utc)]
@@ -1159,8 +1167,9 @@ if __name__ == '__main__':
     n_card.set_type("plain")
     n_card.set_order(999)
     n_card.set_description("Lorem ipsum dolor sit amet, consectetur")
-    deck.add_card(1, 1, n_card)
+    n_card = deck.add_card(1, 1, n_card)
 
     print(deck.get_board(1).get_stack(1).get_card(n_card.get_id()))
 
     #testApi(deck)
+    
