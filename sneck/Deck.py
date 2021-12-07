@@ -3,6 +3,7 @@
 import requests
 import os
 import logging
+import json
 
 from typing import Optional, Union
 from requests import ConnectionError, HTTPError, Timeout, TooManyRedirects
@@ -39,11 +40,85 @@ class DeckAPI:
 
         # Check if the status code is an error or if the return type is not json data in case we screw up
         if not response.ok or 'application/json' not in response.headers['Content-Type']:
+            print(response.json())
             raise APIError(APIError.Reason.RESPONSE, response.status_code, f'Server error while processing response')
         
         print(f'Request succesful, response: {response.status_code}')
         return response.json()
 
+    def post(self, binding: str, payload: dict) -> Optional[Union[list, dict]]:
+        try:
+            print(f'Requesting [POST]: {self.__api_base}{binding}')
+            response = requests.post(self.__api_base + binding, data=json.dumps(payload),
+                                    headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
+                                    auth=HTTPBasicAuth(self.__username, self.__password))
+        except ConnectionError:
+            raise APIError(APIError.Reason.CONNECTION, 0, 'Connection error.')
+        except HTTPError:
+            raise APIError(APIError.Reason.RESPONSE, 0, 'Invalid HTTP response')
+        except Timeout:
+            raise APIError(APIError.Reason.TIMEOUT, 0, 'Timeout during connection')
+        except TooManyRedirects:
+            APIError(APIError.Reason.RESPONSE, 0, 'Too many redirects')
+            return None
+
+        # Check if the status code is an error or if the return type is not json data in case we screw up
+        if not response.ok or 'application/json' not in response.headers['Content-Type']:
+            print(response.json())
+            raise APIError(APIError.Reason.RESPONSE, response.status_code, f'Server error while processing response')
+
+        print(f'Request succesful, response: {response.status_code}')
+        return response.json()
+
+    # Getting an Internal Server Error when using PUT
+    def put(self, binding: str, payload: dict) -> None:
+        try:
+            print(f'Requesting [PUT]: {self.__api_base}{binding}')
+            # Must provide an owner inside the payload
+            # The owner has to be a dictionary and provide all the info required (namely the uid)
+            response = requests.put(self.__api_base + binding, data=json.dumps(payload),
+                                    headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
+                                    auth=HTTPBasicAuth(self.__username, self.__password))
+        except ConnectionError:
+            raise APIError(APIError.Reason.CONNECTION, 0, 'Connection error.')
+        except HTTPError:
+            raise APIError(APIError.Reason.RESPONSE, 0, 'Invalid HTTP response')
+        except Timeout:
+            raise APIError(APIError.Reason.TIMEOUT, 0, 'Timeout during connection')
+        except TooManyRedirects:
+            APIError(APIError.Reason.RESPONSE, 0, 'Too many redirects')
+            return None
+
+        # Check if the status code is an error or if the return type is not json data in case we screw up
+        if not response.ok or 'application/json' not in response.headers['Content-Type']:
+            print(response.json())
+            raise APIError(APIError.Reason.RESPONSE, response.status_code, f'Server error while processing response')
+
+        print(f'Request succesful, response: {response.status_code}')
+    
+    def delete(self, binding: str) -> None:
+        try:
+            print(f'Requesting [DELETE]: {self.__api_base}{binding}')
+            response = requests.delete(self.__api_base + binding,
+                                        headers={'OCS-APIRequest': 'true', 'Content-Type': 'application/json'},
+                                        auth=HTTPBasicAuth(self.__username, self.__password))
+        except ConnectionError:
+            raise APIError(APIError.Reason.CONNECTION, 0, 'Connection error.')
+        except HTTPError:
+            raise APIError(APIError.Reason.RESPONSE, 0, 'Invalid HTTP response')
+        except Timeout:
+            raise APIError(APIError.Reason.TIMEOUT, 0, 'Timeout during connection')
+        except TooManyRedirects:
+            APIError(APIError.Reason.RESPONSE, 0, 'Too many redirects')
+            return None
+
+        # Check if the status code is an error or if the return type is not json data in case we screw up
+        if not response.ok or 'application/json' not in response.headers['Content-Type']:
+            print(response.json())
+            raise APIError(APIError.Reason.RESPONSE, response.status_code, f'Server error while processing response')
+        
+        print(f'Request succesful, response: {response.status_code}')
+        
 
 class DeckUser:
     @unique
@@ -74,6 +149,9 @@ class DeckUser:
         self.__init__(user)
         print(f'[UPDATE] Updated user {self.__uuid}.')
 
+    def serialize(self) -> dict:
+        return {'uid': self.__uuid, 'type': self.__type, 'displayname': self.__name}
+
     def get_name(self) -> str:
         return self.__name
 
@@ -85,6 +163,18 @@ class DeckUser:
 
 
 class DeckAcl:
+    @unique
+    class Type(Enum):
+        USER = 0
+        GROUP = 1
+        CIRCLE = 7
+
+    __types = {
+        '0': Type.USER,
+        '1': Type.GROUP,
+        '7': Type.CIRCLE
+    }
+
     def __init__(self, acl: dict, users: dict) -> None:        
         # Reference to the list of users of the board
         self.__users = users
@@ -107,7 +197,8 @@ class DeckAcl:
         self.__principal = users[acl['participant']['uid']]
 
         # Same as the type for DeckUser
-        self.__type = self.__principal.get_type()
+        #self.__type = self.__principal.get_type()
+        self.__type = self.__types[str(acl['type'])]
 
         # If the user is the owner of the entity
         self.__owner = acl['owner']
@@ -128,6 +219,9 @@ class DeckAcl:
 
     def get_principal(self) -> DeckUser:
         return self.__principal
+
+    def get_type(self) -> Type:
+        return self.__type
 
     def can_edit(self) -> bool:
         return self.__permissions['edit']
@@ -171,6 +265,10 @@ class DeckLabel:
     def update(self, label: dict) -> None:
         self.__init__(label)
         print(f'[UPDATE] Updated label {self.__id}.')
+
+    def serialize(self) -> dict:
+        return {'boardId': self.__board_id, 'id': self.__id, 'ETag': self.__tag, 'title': self.__title, 'color': self.__color,
+                'lastModified': dt.timestamp(self.__last_edited_date)}
 
     def get_title(self) -> str:
         return self.__title
@@ -295,54 +393,86 @@ class DeckCard:
     }
 
     # References to the users and labels dictionaries.
+    def __init__(self, card: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI, updateAttachments: bool = True,
+                newCard: bool = False) -> None:
+        if newCard:
+            # Set everything to None except the API (this might not be an optimal or a clean solution)
+            self.__api = api
+            self.__board_id = None
+            self.__stack_id = None
+            self.__users_dict = None
+            self.__labels_dict = None
+            self.__id = None
+            self.__tag = None
+            self.__type = None
+            self.__order = None
+            self.__title = None
+            self.__description = None
+            self.__labels = None
+            self.__archived = None
+            self.__unread_comments_count = None
+            self.__overdue = None
+            self.__creation_time = None
+            self.__last_edited_time = None
+            self.__deletion_time = None
+            self.__card_due_time = None
+            self.__assigned_users = None
+            self.__owner = None
+            self.__last_editor = None
+            self.__attachment_count = None
+            self.__attachments = None
+        elif card is not None and bid is not None and labels is not None and users is not None:
+            # IDs of the parents of the card
+            self.__board_id = bid
+            self.__stack_id = card['stackId']
 
-    def __init__(self, card: dict, bid: int, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI, updateAttachments: bool = True) -> None:
-        # IDs of the parents of the card
-        self.__board_id = bid
-        self.__stack_id = card['stackId']
+            # References to the label and user dictionaries and the API.
+            self.__users_dict = users
+            self.__labels_dict = labels
+            self.__api = api
 
-        # References to the label and user dictionaries and the API.
-        self.__users_dict = users
-        self.__labels_dict = labels
-        self.__api = api
+            # Attributes of the card
+            self.__id = card['id']
+            self.__tag = card['ETag']
+            self.__type = self.__types[card['type']]
+            self.__order = card['order']
+            self.__title = card['title']
+            self.__description = card['description'].strip()
+            self.__labels = (None if card['labels'] is None else 
+                            [labels[label['ETag']] for label in card['labels']])
+            self.__archived = card['archived']
+            self.__unread_comments_count = card['commentsUnread']
+            self.__overdue = card['overdue']
 
-        # Attributes of the card
-        self.__id = card['id']
-        self.__tag = card['ETag']
-        self.__type = self.__types[card['type']]
-        self.__order = card['order']
-        self.__title = card['title']
-        self.__description = card['description'].strip()
-        self.__labels = [labels[label['ETag']] for label in card['labels']]
-        self.__archived = card['archived']
-        self.__unread_comments_count = card['commentsUnread']
+            # Timestamps
+            self.__creation_time = dt.fromtimestamp(card['createdAt']).astimezone(tz.utc)
+            self.__last_edited_time = dt.fromtimestamp(card['lastModified']).astimezone(tz.utc)
+            self.__deletion_time = (dt.fromtimestamp(card['deletedAt']).astimezone(tz.utc)
+                                    if card['deletedAt'] is not None and card['deletedAt'] != 0 else None)
+            self.__card_due_time = (None if card['duedate'] is None else
+                                    dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z').astimezone(tz.utc))
 
-        # Timestamps
-        self.__creation_time = dt.fromtimestamp(card['createdAt']).astimezone(tz.utc)
-        self.__last_edited_time = dt.fromtimestamp(card['lastModified']).astimezone(tz.utc)
-        self.__deletion_time = (dt.fromtimestamp(card['deletedAt']).astimezone(tz.utc)
-                                if card['deletedAt'] != 0 else None)
-        self.__card_due_time = (None if card['duedate'] is None else
-                                dt.strptime(card['duedate'], '%Y-%m-%dT%H:%M:%S%z').astimezone(tz.utc))
+            # Users
+            self.__assigned_users = (None if card['assignedUsers'] is None else 
+                                    [users[assignee['participant']['uid']] for assignee in card['assignedUsers']])
+            self.__owner = (users[card['owner']['uid']] if isinstance(card['owner'], dict) else
+                            users[card['owner']])
+            self.__last_editor = users[card['lastEditor']] if card['lastEditor'] is not None else None
 
-        # Users
-        self.__assigned_users = [users[assignee['participant']['uid']] for assignee in card['assignedUsers']]
-        self.__owner = users[card['owner']['uid']]
-        self.__last_editor = users[card['lastEditor']] if card['lastEditor'] is not None else None
-
-        # Card attachments
-        self.__attachments = ({attachment['id']: DeckAttachment(attachment, self.__stack_id, self.__board_id, users) for attachment in
-                              api.request(f'boards/{bid}/stacks/{self.__stack_id}/cards/{self.__id}/attachments')}
-                              if card['attachmentCount'] > 0 else {})
-        
-        print(f'[UPDATE] Created card {self.__id}.')
+            # Card attachments
+            self.__attachment_count = card['attachmentCount']
+            self.__attachments = ({attachment['id']: DeckAttachment(attachment, self.__stack_id, self.__board_id, users) for attachment in
+                                api.request(f'boards/{bid}/stacks/{self.__stack_id}/cards/{self.__id}/attachments')}
+                                if self.__attachment_count is not None and self.__attachment_count > 0 else {})
+                                
+            print(f'[UPDATE] Created card {self.__id}.')
 
     def __str__(self) -> str:
         result =  f'CARD "{self.__title}" (Card #{self.__id}, Stack #{self.__stack_id}, Board #{self.__board_id}):\n'
         result += f'    Type: {self.__type}\n'
         result += f'    Description: "{self.get_shortened_description(50)}"\n'
-        result += f'    Labels: {", ".join(label.get_title() for label in self.__labels)}\n'
-        result += f'    Attachments: {"None" if len(self.__attachments) == 0 else len(self.__attachments)}\n'
+        result += f'    Labels: {"None" if self.__labels is None else ", ".join(label.get_title() for label in self.__labels)}\n'
+        result += f'    Attachments: {"None" if self.__attachments is None or len(self.__attachments) == 0 else len(self.__attachments)}\n'
         result += f'    Archived: {"Yes" if self.__archived else "No"}\n'
         result += f'    Due date: {self.__card_due_time if self.__card_due_time else "None"}\n'
         result += f'    Order: {self.__order}\n'
@@ -355,15 +485,15 @@ class DeckCard:
 
         result += (' '*4 + 'LABELS:\n' + ' '*8 +
                    '\n        '.join([e for i in self.__labels for e in str(i).splitlines()]) +
-                   '\n' if len(self.__labels) > 0 else '')
+                   '\n' if self.__labels is not None and len(self.__labels) > 0 else '')
 
         result += (' '*4 + 'ASSIGNED USERS:\n' + ' '*8 +
                    '\n        '.join([e for i in self.__assigned_users for e in str(i).splitlines()]) +
-                   '\n' if len(self.__assigned_users) > 0 else '')
+                   '\n' if self.__assigned_users is not None and len(self.__assigned_users) > 0 else '')
 
         result += (' '*4 + 'ATTACHMENTS:\n' + ' '*8 +
                    '\n        '.join([e for i in self.__attachments for e in str(i).splitlines()]) +
-                   '\n' if len(self.__attachments) > 0 else '')
+                   '\n' if self.__attachments is not None and len(self.__attachments) > 0 else '')
 
         return result
 
@@ -393,6 +523,97 @@ class DeckCard:
                 print(f'[UPDATE] Removed attachment {attachment["id"]} from card {self.__id}.')
         
         print(f'[UPDATE]: Updated card {self.__id}.')
+
+    def serialize(self, complete: bool = False) -> dict:
+        if(complete):
+            return {'title': self.__title, 'type': "plain" if self.__type == 0 else "text", 'order': self.__order, 'description': self.__description,
+                    'duedate': self.__card_due_time, 'boardId': self.__board_id, 'stackId': self.__stack_id, 'id': self.__id, 'ETag': self.__tag, 
+                    'labels': [label.serialize() for label in self.__labels], 'archived': self.__archived, 
+                    'commentsUnread': self.__unread_comments_count, 'overdue': self.__overdue, 'createdAt': dt.timestamp(self.__creation_time), 
+                    'lastModified': dt.timestamp(self.__last_edited_time), 
+                    'deletedAt': None if self.__deletion_time is None else dt.timestamp(self.__deletion_time), 
+                    'duedate': None if self.__card_due_time is None else self.__card_due_time.strftime('%Y-%m-%dT%H:%M:%S%z'), 
+                    'assignedUsers': self.__assigned_users, 'owner': self.__owner.serialize(), 'lastEditor': self.__last_editor, 
+                    'attachmentCount': self.__attachment_count, 'attachments': self.__attachments}
+        else:
+            return {'title': self.__title, 'type': "plain" if self.__type == 0 else "text", 'order': self.__order, 'description': self.__description,
+                'duedate': self.__card_due_time}
+
+    def set_board_id(self, bid: int) -> None:
+        self.__board_id = bid
+
+    def set_stack_id(self, sid: int) -> None:
+        self.__stack_id = sid
+
+    def set_users_dict(self, users: dict[DeckUser]) -> None:
+        self.__users_dict = users
+    
+    def set_labels_dict(self, labels: dict[DeckLabel]) -> None:
+        self.__labels_dict = labels
+    
+    def set_id(self, id: int) -> None:
+        self.__id = id
+
+    def set_tag(self, ETag: str) -> None:
+        self.__tag = ETag
+
+    def set_title(self, title: str) -> None:
+        self.__title = title
+    
+    def set_type(self, c_type: str) -> None:
+        self.__type = self.__types[c_type]
+
+    def set_order(self, order: int) -> None:
+        self.__order = order
+    
+    def set_description(self, description: str) -> None:
+        self.__description = description
+
+    def set_labels(self, labels_dict: dict[DeckLabel]) -> None:
+        self.__labels = (None if self.__labels_dict is None else
+                         [self.__labels_dict[label.get_tag()] for label in self.__labels_dict.values()])
+
+    def set_unread_comments_count(self, unread_comments_count: int) -> None:
+        self.__unread_comments_count = unread_comments_count
+
+    def set_archived(self, archived: bool) -> None:
+        self.__archived = archived
+
+    def set_overdue(self, overdue: int) -> None:
+        self.__overdue = overdue
+
+    def set_creation_time(self, creation_time: dt) -> None:
+        self.__creation_time = dt.fromtimestamp(creation_time).astimezone(tz.utc)
+
+    def set_last_edited_time(self, last_edited_time: dt) -> None:
+        self.__last_edited_time = dt.fromtimestamp(last_edited_time).astimezone(tz.utc)
+
+    def set_deletion_time(self, deletion_time: Union[dt, int]) -> None:
+        self.__deletion_time = (dt.fromtimestamp(deletion_time).astimezone(tz.utc)
+                                if deletion_time != 0 else None)
+
+    def set_card_due_time(self, card_due_time: dt) -> None:
+        self.__card_due_time = (None if card_due_time is None else
+                                dt.strptime(card_due_time, '%Y-%m-%dT%H:%M:%S%z').astimezone(tz.utc))
+
+    def set_assigned_users(self, assigned_users: dict[DeckUser]) -> None:
+        self.__assigned_users = (None if assigned_users is None else
+                                 [self.__users_dict[assignee['participant']['uid']] for assignee in assigned_users])
+
+    def set_owner(self, owner: Union[DeckUser, str]) -> None:
+        self.__owner = (self.__users_dict[owner['uid']] if isinstance(owner, dict) else
+                        self.__users_dict[owner])
+    
+    def set_last_editor(self, last_editor: Union[DeckUser, str]) -> None:
+        self.__last_editor = self.__users_dict[last_editor] if last_editor is not None else None
+
+    def set_attachment_count(self, attachment_count: int) -> None:
+        self.__attachment_count = attachment_count
+
+    def set_attachments(self, attachments) -> None:
+        self.__attachments = ({attachment['id']: DeckAttachment(attachment, self.__stack_id, self.__board_id, self.__users_dict) for attachment in
+                                api.request(f'boards/{bid}/stacks/{self.__stack_id}/cards/{self.__id}/attachments')}
+                                if self.__attachment_count is not None and self.__attachment_count > 0 else {})
 
     def get_title(self) -> str:
         return self.__title
@@ -464,6 +685,9 @@ class DeckCard:
     def is_deleted(self) -> bool:
         return self.__deletion_time is not None
 
+    def is_overdue(self) -> bool:
+        return self.__overdue == 1
+
     def get_id(self) -> int:
         return self.__id
 
@@ -485,10 +709,10 @@ class DeckStack:
 
         self.__last_edited_time = dt.fromtimestamp(stack['lastModified']).astimezone(tz.utc)
         self.__deletion_time = (dt.fromtimestamp(stack['deletedAt']).astimezone(tz.utc)
-                                if stack['deletedAt'] != 0 else None)
+                                if stack['deletedAt'] is not None and stack['deletedAt'] != 0 else None)
 
         self.__title = stack['title']
-        self.__cards = ({card['id']: DeckCard(card, self.__board_id, labels, users, api) for card in stack['cards']}
+        self.__cards = ({card['id']: DeckCard(card, self.__board_id, labels, users, api) for card in stack['cards'] if card is dict}
                         if 'cards' in stack else {})
         
         print(f'[UPDATE] Created stack {self.__id}.')
@@ -517,16 +741,36 @@ class DeckStack:
 
         for card in stack['cards']:
             if card['id'] not in self.__cards:
-                self.__cards[card['id']] = DeckCard(card, self.__labels, self.__users, api)
+                self.__cards[card['id']] = DeckCard(card, self.__board_id, self.__labels_dict, self.__users_dict, self.__api)
                 print(f'[UPDATE] Added card #{card["id"]} to stack #{self.__id}.')
             elif card['id'] in self.__cards and self.__cards[card['id']].get_tag() != card['ETag']:
                 self.__cards[card['id']].update(card)
                 print(f'[UPDATE] Updated card #{card["id"]} of stack #{self.__id}.')
-            elif card['id'] in self.__cards and card['deletedAt'] != 0:
+            elif card['id'] in self.__cards and card['deletedAt'] is not None and card['deletedAt'] != 0:
                 self.__cards.pop(card['id'])
                 print(f'[UPDATE] Removed card #{card["id"]} from stack #{self.__id}.')
         
-        print(f'[UPDATE]: Updated stack {self.__id}.')
+        print(f'[UPDATE] Updated stack {self.__id}.')
+
+    def serialize(self, complete: bool = False) -> dict:
+        result = {'boardId': self.__board_id, 'id': self.__id, 'ETag': self.__tag, 'order': self.__order, 
+                'lastModified': dt.timestamp(self.__last_edited_time),
+                'deletedAt': self.__deletion_time, 'title': self.__title, 'cards': [c for c in self.__cards.values()]}
+
+        if complete:
+            result | {}
+
+        return result
+
+    def add_card(self, card: DeckCard) -> DeckCard:
+        new_card = self.__api.post(f'boards/{self.__board_id}/stacks/{self.__id}/cards', card.serialize())
+        
+        self.__cards[new_card['id']] = new_card
+        self.update(self.serialize())
+
+        print('[UPDATE] Created card {0}.'.format(new_card['id']))
+
+        return self.get_card(new_card['id'])
 
     def get_title(self) -> str:
         return self.__title
@@ -546,7 +790,7 @@ class DeckStack:
         return sorted(
             [card for card in self.__cards.items() if (not label or card.has_label(label))
              and (not assigned or card.is_assigned(assigned)) and (deleted is None or card.is_deleted() == deleted)],
-            key=lambda c: c.get_order())
+            key=lambda c: c[1].get_order())
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
         return sorted([c for c in self.__cards.values() if c.get_due_time() and (past or c.get_due_time() >= dt.now(tz.utc))],
@@ -667,6 +911,9 @@ class DeckBoard:
         
         print(f'[UPDATE] Updated board {self.__id}.')
 
+    def add_card(self, sid: int, card: DeckCard) -> DeckCard:
+        return self.get_stack(sid).add_card(card)
+
     def can_read(self, uid: Optional[str] = None) -> bool:
         if not uid:
             return self.__permissions['PERMISSION_READ']
@@ -738,10 +985,10 @@ class DeckBoard:
         return self.__notifications
 
     def get_stacks(self) -> list[DeckStack]:
-        return sorted(self.__stacks, key=lambda s: s.get_order())
+        return sorted(self.__stacks.values(), key=lambda s: s.get_order())
 
     def get_stack(self, sid: int) -> Optional[DeckStack]:
-        result = [item for item in self.__stacks if item.get_id() == sid]
+        result = [item for item in self.__stacks.values() if item.get_id() == sid]
         return result[0] if len(result) == 1 else None
 
     def get_cards(self, label: Optional[Union[str, DeckLabel]] = None,
@@ -801,6 +1048,12 @@ class Deck:
         
         self.__events = sorted([e for ls in [v.get_events(past=True) for k, v in self.__boards.items()] for e in ls],
                                key=lambda x: x.get_due_time())
+    
+    def new_card(self) -> DeckCard:
+        return DeckCard(None, None, None, None, self.__api, False, True)
+
+    def add_card(self, bid: int, sid: int, card: DeckCard) -> DeckCard:
+        return self.get_board(bid).add_card(sid, card)
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
         return [e for e in self.__events if past or e.get_due_time >= dt.now(tz.utc)]
@@ -812,9 +1065,9 @@ class Deck:
                   assigned: Optional[Union[str, DeckUser]] = None,
                   deleted: Optional[bool] = None) -> list[DeckCard]:
         return sorted(
-            [card for board in self.__boards for stack in board.get_stacks() for card in stack
+            [card for board in self.__boards.values() for stack in board.get_stacks() for card in stack.get_cards()
              if (not label or card.has_label(label)) and (not assigned or card.is_assigned(assigned))
-             and (deleted is None or card.is_deleted() == deleted)], key=lambda c: c.get_order())
+             and (deleted is None or card.is_deleted() == deleted)], key=lambda c: c[1].get_order())
 
     def get_card(self, cid: int) -> Optional[DeckCard]:
         for board in self.get_boards():
@@ -827,7 +1080,7 @@ class Deck:
         return [v for k, v in self.__boards]
 
     def get_board(self, bid: int) -> Optional[DeckBoard]:
-        for board in self.__boards:
+        for board in self.__boards.values():
             if board.get_id() == bid:
                 return board
         return None
@@ -847,7 +1100,57 @@ class Deck:
     
     def request(self, endpoint: str) -> Optional[Union[list, dict]]:
         return self.__api.request(endpoint)
+    
+    def post(self, endpoint: str, payload: dict) -> Optional[Union[list, dict]]:
+        return self.__api.post(endpoint, payload)
+    
+    def put(self, endpoint: str, payload: dict) -> None:
+        self.__api.put(endpoint, payload)
 
+    def delete(self, endpoint: str) -> None:
+        self.__api.delete(endpoint)
+
+
+def testApi(deck: Deck):
+    while True:
+        while True:
+            try:
+                oper = int(input('\nChoose operation:\n(1)get\n(2)post\n(3)put\n(4)delete\n: '))
+                if oper >= 1 and oper <= 4:
+                    break
+                else:
+                    print(f'Try again')
+            except KeyboardInterrupt:
+                print()
+                exit(1)
+            except:
+                print(f'Try again')
+            
+        endpoint = input('> ')
+
+        if oper == 1:
+            print(deck.request(endpoint))
+        elif oper == 2:
+            card_title = input('title: ')
+            card_type = input('type: ')
+            card_order = int(input('order: '))
+            card_description = input('description: ')
+            payload_dict = {'title': card_title, 'type': card_type, 'order': card_order, 'description': card_description}
+            print(deck.post(endpoint, payload_dict))
+        elif oper == 3:
+            card_title = input('title: ')
+            card_type = input('type: ')
+            card_order = int(input('order(int): '))
+            card_description = input('description: ')
+            payload_dict = {'title': card_title, 'type': card_type, 'order': card_order, 'description': card_description, 
+            'duedate': dt.now(tz.utc).isoformat(), 'owner': {'uid': "omgrly"}}
+            deck.put(endpoint, payload_dict)
+        elif oper == 4:
+            deck.delete(endpoint)
+
+# TODO:
+# Check the handling of labels
+# Check setting types with Type
 
 # Test basic program functionality
 if __name__ == '__main__':
@@ -859,6 +1162,14 @@ if __name__ == '__main__':
     deck = Deck(deck_hostname, deck_username, deck_password, deck_security)
     print(deck)
 
-    while True:
-        endpoint = input('> ')
-        print(deck.request(endpoint))
+    n_card = deck.new_card()
+    n_card.set_title("Best Card Ever")
+    n_card.set_type("plain")
+    n_card.set_order(999)
+    n_card.set_description("Lorem ipsum dolor sit amet, consectetur")
+    n_card = deck.add_card(1, 1, n_card)
+
+    print(deck.get_board(1).get_stack(1).get_card(n_card.get_id()))
+
+    #testApi(deck)
+    
