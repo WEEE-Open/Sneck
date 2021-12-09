@@ -528,7 +528,7 @@ class DeckCard:
         if(complete):
             return {'title': self.__title, 'type': "plain" if self.__type == 0 else "text", 'order': self.__order, 'description': self.__description,
                     'duedate': self.__card_due_time, 'boardId': self.__board_id, 'stackId': self.__stack_id, 'id': self.__id, 'ETag': self.__tag, 
-                    'labels': [label.serialize() for label in self.__labels], 'archived': self.__archived, 
+                    'labels': ([label.serialize() for label in self.__labels] if self.__labels is not None else {}), 'archived': self.__archived, 
                     'commentsUnread': self.__unread_comments_count, 'overdue': self.__overdue, 'createdAt': dt.timestamp(self.__creation_time), 
                     'lastModified': dt.timestamp(self.__last_edited_time), 
                     'deletedAt': None if self.__deletion_time is None else dt.timestamp(self.__deletion_time), 
@@ -712,7 +712,7 @@ class DeckStack:
                                 if stack['deletedAt'] is not None and stack['deletedAt'] != 0 else None)
 
         self.__title = stack['title']
-        self.__cards = ({card['id']: DeckCard(card, self.__board_id, labels, users, api) for card in stack['cards'] if card is dict}
+        self.__cards = ({card['id']: DeckCard(card, self.__board_id, labels, users, api) for card in stack['cards'] if isinstance(card, dict)}
                         if 'cards' in stack else {})
         
         print(f'[UPDATE] Created stack {self.__id}.')
@@ -755,7 +755,7 @@ class DeckStack:
     def serialize(self, complete: bool = False) -> dict:
         result = {'boardId': self.__board_id, 'id': self.__id, 'ETag': self.__tag, 'order': self.__order, 
                 'lastModified': dt.timestamp(self.__last_edited_time),
-                'deletedAt': self.__deletion_time, 'title': self.__title, 'cards': [c for c in self.__cards.values()]}
+                'deletedAt': self.__deletion_time, 'title': self.__title, 'cards': [c.serialize(True) for c in self.__cards.values()]}
 
         if complete:
             result | {}
@@ -765,12 +765,19 @@ class DeckStack:
     def add_card(self, card: DeckCard) -> DeckCard:
         new_card = self.__api.post(f'boards/{self.__board_id}/stacks/{self.__id}/cards', card.serialize())
         
-        self.__cards[new_card['id']] = new_card
+        self.__cards[new_card['id']] = DeckCard(new_card, self.__board_id, self.__labels_dict, self.__users_dict, self.__api)
         self.update(self.serialize())
 
         print('[UPDATE] Created card {0}.'.format(new_card['id']))
 
         return self.get_card(new_card['id'])
+
+    def delete_card(self, cid: int) -> None:
+        self.__api.delete(f'boards/{self.__board_id}/stacks/{self.__id}/cards/{cid}')
+
+        if self.get_card(cid) is not None:
+            self.get_card(cid).set_deletion_time(dt.timestamp(dt.now()))
+        self.update(self.serialize())
 
     def get_title(self) -> str:
         return self.__title
@@ -913,6 +920,9 @@ class DeckBoard:
 
     def add_card(self, sid: int, card: DeckCard) -> DeckCard:
         return self.get_stack(sid).add_card(card)
+    
+    def delete_card(self, sid: int, cid: int) -> None:
+        self.get_stack(sid).delete_card(cid)
 
     def can_read(self, uid: Optional[str] = None) -> bool:
         if not uid:
@@ -1055,6 +1065,9 @@ class Deck:
     def add_card(self, bid: int, sid: int, card: DeckCard) -> DeckCard:
         return self.get_board(bid).add_card(sid, card)
 
+    def delete_card(self, bid: int, sid: int, cid: int) -> None:
+        self.get_board(bid).delete_card(sid, cid)
+
     def get_events(self, past: bool = False) -> list[DeckCard]:
         return [e for e in self.__events if past or e.get_due_time >= dt.now(tz.utc)]
 
@@ -1148,6 +1161,16 @@ def testApi(deck: Deck):
         elif oper == 4:
             deck.delete(endpoint)
 
+def testAddCard(deck: Deck) -> DeckCard:
+    n_card = deck.new_card()
+    n_card.set_title("Best Card Ever")
+    n_card.set_type("plain")
+    n_card.set_order(999)
+    n_card.set_description("Lorem ipsum dolor sit amet, consectetur")
+    n_card = deck.add_card(1, 1, n_card)
+
+    return n_card
+
 # TODO:
 # Check the handling of labels
 # Check setting types with Type
@@ -1161,15 +1184,10 @@ if __name__ == '__main__':
 
     deck = Deck(deck_hostname, deck_username, deck_password, deck_security)
     print(deck)
-
-    n_card = deck.new_card()
-    n_card.set_title("Best Card Ever")
-    n_card.set_type("plain")
-    n_card.set_order(999)
-    n_card.set_description("Lorem ipsum dolor sit amet, consectetur")
-    n_card = deck.add_card(1, 1, n_card)
-
-    print(deck.get_board(1).get_stack(1).get_card(n_card.get_id()))
+    
+    new_card = testAddCard(deck)
+    print(deck.get_board(1).get_stack(1))
+    deck.delete_card(1, 1, new_card.get_id())
+    print(deck.get_board(1).get_stack(1))
 
     #testApi(deck)
-    
