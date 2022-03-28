@@ -528,7 +528,7 @@ class DeckCard:
         if(complete):
             return {'title': self.__title, 'type': "plain" if self.__type == 0 else "text", 'order': self.__order, 'description': self.__description,
                     'duedate': self.__card_due_time, 'boardId': self.__board_id, 'stackId': self.__stack_id, 'id': self.__id, 'ETag': self.__tag, 
-                    'labels': [label.serialize() for label in self.__labels], 'archived': self.__archived, 
+                    'labels': ([label.serialize() for label in self.__labels] if self.__labels is not None else {}), 'archived': self.__archived, 
                     'commentsUnread': self.__unread_comments_count, 'overdue': self.__overdue, 'createdAt': dt.timestamp(self.__creation_time), 
                     'lastModified': dt.timestamp(self.__last_edited_time), 
                     'deletedAt': None if self.__deletion_time is None else dt.timestamp(self.__deletion_time), 
@@ -696,26 +696,41 @@ class DeckCard:
 
 
 class DeckStack:
-    def __init__(self, stack: dict, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI, updateCards: bool = True) -> None:
-        # Internal identifiers for the stack
-        self.__board_id = stack['boardId']
-        self.__id = stack['id']
-        self.__tag = stack['ETag']
-        self.__order = stack['order']
-
-        self.__labels_dict = labels
-        self.__users_dict = users
-        self.__api = api
-
-        self.__last_edited_time = dt.fromtimestamp(stack['lastModified']).astimezone(tz.utc)
-        self.__deletion_time = (dt.fromtimestamp(stack['deletedAt']).astimezone(tz.utc)
-                                if stack['deletedAt'] is not None and stack['deletedAt'] != 0 else None)
-
-        self.__title = stack['title']
-        self.__cards = ({card['id']: DeckCard(card, self.__board_id, labels, users, api) for card in stack['cards'] if card is dict}
-                        if 'cards' in stack else {})
+    def __init__(self, stack: dict, labels: dict[DeckLabel], users: dict[DeckUser], api: DeckAPI, updateCards: bool = True, 
+                newStack: bool = False) -> None:
         
-        print(f'[UPDATE] Created stack {self.__id}.')
+        if newStack:
+            self.__api = api
+            self.__board_id = None
+            self.__id = None
+            self.__tag = None
+            self.__order = None
+            self.__labels_dict = None
+            self.__users_dict = None
+            self.__last_edited_time = None
+            self.__deletion_time = None
+            self.__title = None
+            self.__cards = None
+        elif stack is not None and labels is not None and users is not None:
+            # Internal identifiers for the stack
+            self.__board_id = stack['boardId']
+            self.__id = stack['id']
+            self.__tag = stack['ETag']
+            self.__order = stack['order']
+
+            self.__labels_dict = labels
+            self.__users_dict = users
+            self.__api = api
+
+            self.__last_edited_time = dt.fromtimestamp(stack['lastModified']).astimezone(tz.utc)
+            self.__deletion_time = (dt.fromtimestamp(stack['deletedAt']).astimezone(tz.utc)
+                                    if stack['deletedAt'] is not None and stack['deletedAt'] != 0 else None)
+
+            self.__title = stack['title']
+            self.__cards = ({card['id']: DeckCard(card, self.__board_id, labels, users, api) for card in stack['cards'] if isinstance(card, dict)}
+                            if 'cards' in stack else {})
+            
+            print(f'[UPDATE] Created stack {self.__id}.')
 
     def __str__(self) -> str:
         result = f'STACK "{self.__title}" (Stack #{self.__id}, Board #{self.__board_id}):\n'
@@ -753,24 +768,31 @@ class DeckStack:
         print(f'[UPDATE] Updated stack {self.__id}.')
 
     def serialize(self, complete: bool = False) -> dict:
-        result = {'boardId': self.__board_id, 'id': self.__id, 'ETag': self.__tag, 'order': self.__order, 
-                'lastModified': dt.timestamp(self.__last_edited_time),
-                'deletedAt': self.__deletion_time, 'title': self.__title, 'cards': [c for c in self.__cards.values()]}
-
         if complete:
-            result | {}
-
+            result = {'boardId': self.__board_id, 'id': self.__id, 'ETag': self.__tag, 'order': self.__order, 
+                    'lastModified': dt.timestamp(self.__last_edited_time),
+                    'deletedAt': self.__deletion_time, 'title': self.__title, 'cards': [c.serialize(True) for c in self.__cards.values()]}
+        else:
+            result = {'title': self.__title, 'order': self.__order}
+        
         return result
 
     def add_card(self, card: DeckCard) -> DeckCard:
         new_card = self.__api.post(f'boards/{self.__board_id}/stacks/{self.__id}/cards', card.serialize())
         
-        self.__cards[new_card['id']] = new_card
+        self.__cards[new_card['id']] = DeckCard(new_card, self.__board_id, self.__labels_dict, self.__users_dict, self.__api)
         self.update(self.serialize())
 
         print('[UPDATE] Created card {0}.'.format(new_card['id']))
 
         return self.get_card(new_card['id'])
+
+    def delete_card(self, cid: int) -> None:
+        self.__api.delete(f'boards/{self.__board_id}/stacks/{self.__id}/cards/{cid}')
+
+        if self.get_card(cid) is not None:
+            self.get_card(cid).set_deletion_time(dt.timestamp(dt.now()))
+        self.update(self.serialize())
 
     def get_title(self) -> str:
         return self.__title
@@ -809,6 +831,16 @@ class DeckStack:
     def get_tag(self) -> str:
         return self.__tag
 
+    def set_title(self, title: str) -> None:
+        self.__title = title
+
+    def set_order(self, order: int) -> None:
+        self.__order = order
+
+    def set_deletion_time(self, deletion_time: Union[dt, int]) -> None:
+        self.__deletion_time = (dt.fromtimestamp(deletion_time).astimezone(tz.utc)
+                                if deletion_time != 0 else None)
+
 
 class DeckBoard:
     @unique
@@ -823,42 +855,74 @@ class DeckBoard:
         'all': NotificationType.ALL
     }
 
-    def __init__(self, board: dict, api: DeckAPI, updateStacks: bool = True) -> None:
-        # Internal identifiers for the board
-        self.__id = board['id']
-        self.__tag = board['ETag']
+    def __init__(self, board: dict, api: DeckAPI, updateStacks: bool = True, newBoard: bool = False) -> None:
 
-        self.__api = api
+        if newBoard:
+            self.__id = None
+            self.__tag = None
+            self.__api = None
+            self.__permissions = None
+            self.__notifications = None
+            self.__synchronize = None
+            self.__title = None
+            self.__color = None
+            self.__labels = None
+            self.__archived = None
+            self.__users = None
+            self.__owner = None
+            self.__acl = None
+            self.__archived = None
+            self.__shared = None
+            self.__deletion_time = None
+            self.__last_edited_time = None
+            self.__stacks = None
+        elif board is not None and api is not None:
+            # Internal identifiers for the board
+            self.__id = board['id']
+            self.__tag = board['ETag']
 
-        # Internal board settings
-        self.__permissions = board['permissions']  # Permissions for this user (r,w,share,manage)
-        self.__notifications = self.__notification_type[board['settings']['notify-due']]
-        self.__synchronize = board['settings']['calendar']  # Whether the board synchronizes with CalDAV
+            self.__api = api
 
-        self.__title = board['title']
-        self.__color = board['color']
-        self.__labels = {label['ETag']: DeckLabel(label) for label in board['labels']}
+            # Internal board settings
+            self.__permissions = board['permissions']  # Permissions for this user (r,w,share,manage)
+            self.__notifications = (self.__notification_type[board['settings']['notify-due']] 
+                                    if isinstance(board['settings'], dict) else None)
+            self.__synchronize = (board['settings']['calendar']     # Whether the board synchronizes with CalDAV
+                                    if isinstance(board['settings'], dict) else None)
 
-        # Users and access control
-        self.__users = {user['uid']: DeckUser(user) for user in board['users']}
-        self.__owner = self.__users[board['owner']['uid']]
+            self.__title = board['title']
+            self.__color = board['color']
+            self.__labels = {label['ETag']: DeckLabel(label) for label in board['labels']}
+            self.__archived = board['archived']
 
-        self.__acl = {acl['participant']['uid']: DeckAcl(acl, self.__users) for acl in board['acl']}
+            # Users and access control
+            self.__users = {user['uid']: DeckUser(user) for user in board['users']}
+            if (board['owner']['uid'] if isinstance(board['owner'], dict) else board['owner']) not in self.__users:
+                if isinstance(board['owner'], dict):
+                    self.__users[board['owner']['uid']] = DeckUser({'uid': board['owner']['uid'],
+                        'type': board['owner']['type'], 'displayname': board['owner']['displayname']})
+                else:
+                    self.__users[board['owner']] = DeckUser({'displayname': board['owner']})
 
-        self.__archived = board['archived']  # Board archived by current user
-        self.__shared = board['shared']  # Board shared to the current user (not owned by current user)
+            self.__owner = (self.__users[board['owner']['uid']] if isinstance(board['owner'], dict) else
+                            self.__users[board['owner']])
 
-        # Timestamps for deletion and last edit. Deletion timestamp is 0 if the board has not been deleted
-        self.__deletion_time = (dt.fromtimestamp(board['deletedAt']).astimezone(tz.utc)
-                                if board['deletedAt'] != 0 else None)
+            self.__acl = {acl['participant']['uid']: DeckAcl(acl, self.__users) for acl in board['acl']}
 
-        self.__last_edited_time = (None if board['lastModified'] == 0
-                                   else dt.fromtimestamp(board['lastModified']).astimezone(tz.utc))
+            self.__archived = board['archived']  # Board archived by current user
+            self.__shared = board['shared'] = None # Board shared to the current user (not owned by current user)
 
-        self.__stacks = {stack['id']: DeckStack(stack, self.__labels, self.__users, api)
-                         for stack in api.request(f'boards/{self.__id}/stacks')}
-        
-        print(f'[UPDATE] Created board {self.__id}.')
+            # Timestamps for deletion and last edit. Deletion timestamp is 0 if the board has not been deleted
+            self.__deletion_time = (dt.fromtimestamp(board['deletedAt']).astimezone(tz.utc)
+                                    if board['deletedAt'] != 0 else None)
+
+            self.__last_edited_time = (None if board['lastModified'] == 0
+                                    else dt.fromtimestamp(board['lastModified']).astimezone(tz.utc))
+
+            self.__stacks = {stack['id']: DeckStack(stack, self.__labels, self.__users, api)
+                            for stack in api.request(f'boards/{self.__id}/stacks')}
+            
+            print(f'[UPDATE] Created board {self.__id}.')
 
     def __str__(self) -> str:
         result = f'BOARD "{self.__title}" (Board #{self.__id}):\n'
@@ -898,9 +962,10 @@ class DeckBoard:
 
     def update(self, board: dict) -> None:
         board = self.__api.request(f'boards/{self.__id}')
+        board['shared'] = None
         self.__init__(board, self.__api, updateStacks=False)
 
-        stacks = api.request(f'boards/{self.__id}/stacks')
+        stacks = self.__api.request(f'boards/{self.__id}/stacks')
         for stack in board['stacks']:
             if stack['id'] not in self.__stacks:
                 self.__stacks[stack['id']] = DeckStack(stack, self.__labels, self.__users, api)
@@ -911,8 +976,35 @@ class DeckBoard:
         
         print(f'[UPDATE] Updated board {self.__id}.')
 
+    def serialize(self, complete: bool = False) -> dict:
+        if complete:
+            result = {'title': self.__title, 'owner': self.__owner, 'color': self.__color, 'archived': self.__archived, 'labels': self.__labels,
+                    'acl': self.__acl, 'permissions': self.__permissions, 'users': self.__users, 'shared': self.__shared, 'id': self.__id,
+                    'lastModified': dt.timestamp(self.__last_edited_time), 'deletedAt': self.__deletion_time,
+                    'settings': {'notify-due': self.__notifications, 'calendar': self.__synchronize} }
+        else:
+            result = {'title': self.__title, 'color': self.__color}
+
+        return result
+
     def add_card(self, sid: int, card: DeckCard) -> DeckCard:
         return self.get_stack(sid).add_card(card)
+    
+    def delete_card(self, sid: int, cid: int) -> None:
+        self.get_stack(sid).delete_card(cid)
+
+    def add_stack(self, stack: DeckStack) -> None:
+        new_stack = self.__api.post(f'boards/{self.__id}/stacks', stack.serialize())
+        # There is no response with the data we need to identify the new stack
+        
+        self.update(self.serialize())
+
+    def delete_stack(self, sid: int) -> None:
+        self.__api.delete(f'boards/{self.__id}/stacks/{sid}')
+
+        if self.get_stack(sid) is not None:
+            self.get_stack(sid).set_deletion_time(dt.timestamp(dt.now()))
+        self.update(self.serialize())
 
     def can_read(self, uid: Optional[str] = None) -> bool:
         if not uid:
@@ -1018,6 +1110,16 @@ class DeckBoard:
     def get_tag(self) -> str:
         return self.__tag
 
+    def set_title(self, title: str) -> None:
+        self.__title = title
+
+    def set_color(self, color: str) -> None:
+        self.__color = color
+
+    def set_deletion_time(self, deletion_time: Union[dt, int]) -> None:
+        self.__deletion_time = (dt.fromtimestamp(deletion_time).astimezone(tz.utc)
+                                if deletion_time != 0 else None)
+
 
 class Deck:
     def __init__(self, domain: str, username: str, password: str, secure: bool) -> None:
@@ -1042,7 +1144,7 @@ class Deck:
             if board['id'] not in self.__boards:
                 self.__boards[board['id']] = DeckBoard(board, self.__api)
             elif board['id'] in self.__boards and self.__boards[board['id']].get_tag() != board['ETag']:
-                self.__boards[board['id']].update()
+                self.__boards[board['id']].update(board)
             elif board['id'] in self.__boards and board['deletedAt'] != 0:
                 self.__boards.pop(board['id'])
         
@@ -1054,6 +1156,38 @@ class Deck:
 
     def add_card(self, bid: int, sid: int, card: DeckCard) -> DeckCard:
         return self.get_board(bid).add_card(sid, card)
+
+    def delete_card(self, bid: int, sid: int, cid: int) -> None:
+        self.get_board(bid).delete_card(sid, cid)
+
+    def new_stack(self) -> DeckStack:
+        return DeckStack(None, None, None, self.__api, False, newStack = True)
+
+    def add_stack(self, bid: int, stack: DeckStack) -> None:
+        self.get_board(bid).add_stack(stack)
+
+    def delete_stack(self, bid: int, sid: int) -> None:
+        self.get_board(bid).delete_stack(sid)
+
+    def new_board(self) -> DeckBoard:
+        return DeckBoard(None, self.__api, False, newBoard = True)
+
+    def add_board(self, board: DeckBoard) -> DeckBoard:
+        new_board = self.__api.post(f'boards', board.serialize())
+
+        self.__boards[new_board['id']] = DeckBoard(new_board, self.__api)
+        self.update()
+
+        print('[UPDATE] Created board {0}.'.format(new_board['id']))
+
+        return self.get_board(new_board['id'])
+
+    def delete_board(self, bid: int) -> None:
+        self.__api.delete(f'boards/{bid}')
+
+        if self.get_board(bid) is not None:
+            self.get_board(bid).set_deletion_time(dt.timestamp(dt.now()))
+        self.update()
 
     def get_events(self, past: bool = False) -> list[DeckCard]:
         return [e for e in self.__events if past or e.get_due_time >= dt.now(tz.utc)]
@@ -1148,6 +1282,33 @@ def testApi(deck: Deck):
         elif oper == 4:
             deck.delete(endpoint)
 
+def testAddCard(deck: Deck) -> DeckCard:
+    n_card = deck.new_card()
+    n_card.set_title("Best Card Ever")
+    n_card.set_type("plain")
+    n_card.set_order(999)
+    n_card.set_description("Lorem ipsum dolor sit amet, consectetur")
+    n_card = deck.add_card(1, 1, n_card)
+
+    return n_card
+
+def testAddStack(deck: Deck) -> DeckStack:
+    n_stack = deck.new_stack()
+    n_stack.set_title("Best Stack Ever")
+    n_stack.set_order(999)
+    n_stack = deck.add_stack(1, n_stack)
+
+    return n_stack
+
+def testAddBoard(deck: Deck) -> DeckBoard:
+    n_board = deck.new_board()
+    n_board.set_title("Best Board Ever!")
+    n_board.set_color("ff0000")
+    n_board = deck.add_board(n_board)
+
+    return n_board
+    
+
 # TODO:
 # Check the handling of labels
 # Check setting types with Type
@@ -1162,14 +1323,4 @@ if __name__ == '__main__':
     deck = Deck(deck_hostname, deck_username, deck_password, deck_security)
     print(deck)
 
-    n_card = deck.new_card()
-    n_card.set_title("Best Card Ever")
-    n_card.set_type("plain")
-    n_card.set_order(999)
-    n_card.set_description("Lorem ipsum dolor sit amet, consectetur")
-    n_card = deck.add_card(1, 1, n_card)
-
-    print(deck.get_board(1).get_stack(1).get_card(n_card.get_id()))
-
     #testApi(deck)
-    
